@@ -11,7 +11,6 @@ import tabulate
 import utils, models
 import wandb
 from torch.utils.data import DataLoader
-import pdb
 
 # import warnings
 # warnings.filterwarnings('ignore')
@@ -27,24 +26,49 @@ parser.add_argument("--resume", type=str, default=None,
 parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
 
+parser.add_argument("--save_pred", action='store_true',
+        help = "Save ground truth and prediction as csv (Default : False)")
+
 # Data ---------------------------------------------------------
 parser.add_argument(
     "--data_path",
     type=str,
     default='./data/data_final_mod.csv',
     help="path to datasets location",)
+
+parser.add_argument("--tr_ratio", type=float, default=0.7,
+          help="Ratio of train data (Default : 0.2)")
+
+parser.add_argument("--val_ratio", type=float, default=0.1,
+          help="Ratio of validation data (Default : 0.1)")
+
+parser.add_argument("--te_ratio", type=float, default=0.2,
+          help="Ratio of test data (Default : 0.2)")
+
+parser.add_argument(
+    "--batch_size",
+    type=int, default=32,
+    help="Batch Size (default : 32)"
+)
+
+parser.add_argument(
+    "--scaling",
+    type=str,
+    default='minmax',
+    choices=['minmax', 'normalization']
+)
 #----------------------------------------------------------------
 
 
 # Model ---------------------------------------------------------
 parser.add_argument(
     "--model",
-    type=str, default='MLP',
-    choices=["MagNet", "GCN", "GAT", "MLP", "Linear", "SVM"],
-    help="model name (default : MLP)")
+    type=str, default='transformer',
+    choices=["transformer", "linear", "ridge", "mlp", "svr"],
+    help="model name (default : transformer)")
 
 parser.add_argument("--save_path",
-            type=str, default="./exp_result/",
+            type=str, default="/mlainas/medical-ai/cluster-regression/exp_result/",
             help="Path to save best model dict")
 
 parser.add_argument(
@@ -57,6 +81,12 @@ parser.add_argument(
     "--hidden_dim",
     type=int, default=64,
     help="MLP model hidden size (default : 64)"
+)
+
+parser.add_argument(
+    "--output_size",
+    type=int, default=2,
+    help="Output size (default : 2)"
 )
 
 parser.add_argument(
@@ -91,24 +121,20 @@ parser.add_argument("--momentum", type=float, default=0.9,
 
 parser.add_argument("--nesterov", action='store_true',  help="Nesterov (Default : False)")
 
-parser.add_argument("--epochs", type=int, default=100, metavar="N",
-    help="number epochs to train (Default : 100)")
+parser.add_argument("--epochs", type=int, default=300, metavar="N",
+    help="number epochs to train (Default : 300)")
 
 parser.add_argument("--wd", type=float, default=5e-4, help="weight decay (Default: 5e-4)")
 
-parser.add_argument("--scheduler", type=str, default=None, choices=[None, "cos_anneal"])
+parser.add_argument("--scheduler", type=str, default='constant', choices=['constant', "cos_anneal"])
 
-parser.add_argument("--t_max", type=int, default=50,
-                help="T_max for Cosine Annealing Learning Rate Scheduler (Default : 50)")
+parser.add_argument("--t_max", type=int, default=300,
+                help="T_max for Cosine Annealing Learning Rate Scheduler (Default : 300)")
 #----------------------------------------------------------------
 
-# Hyperparameter for setting --------------------------------------
-parser.add_argument("--target_order", type=int, default=3,
-          help="Decide how much order we get (Default : 3)") # 3: 3차까지는 주어진 상태에서, 4차 여부 예측
+parser.add_argument("--lamb", type=float, default=0.0,
+                help="Penalty term for Ridge Regression (Default : 0)")
 
-# parser.add_argument("--train_ratio", type=float, default=0.2,
-#           help="Ratio of train data (Default : 0.2)") # 0.8: n차 감염의 20%를 train으로 활용
-#----------------------------------------------------------------
 
 args = parser.parse_args()
 ## ----------------------------------------------------------------------------------------------------
@@ -126,51 +152,36 @@ print(f"Device : {args.device}")
 if args.ignore_wandb == False:
     wandb.init(project="cluster-medical-ai")
     wandb.config.update(args)
-    wandb.run.name = f"{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out} for order {args.target_order}"
+    wandb.run.name = f"{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
 
 
 ## Load Data --------------------------------------------------------------------------------
-# final_data_list, y_min, y_max = utils.full_load_data(data_path = args.data_path,  
-#                                         num_features = args.num_features,
-#                                         target_order = args.target_order,
-#                                         train_ratio = 0.2,
-#                                         classification = True,
-#                                         device = args.device,
-#                                         model_name = args.model)
 data = pd.read_csv(args.data_path)
-dataset = utils.Tabledata(data)
+dataset = utils.Tabledata(data, args.scaling)
 # dataset = utils.Seqdata(data)
-dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 print("Successfully load data!")
 #-------------------------------------------------------------------------------------
 
 
 ## Model ------------------------------------------------------------------------------------
-if args.model == "MagNet":
-    model_type = 'graph'
-    model = models.MagNet(in_channels=args.num_features, hidden=8, drop_out=args.drop_out).to(args.device) # hidden -> q -> K 차례로 수정하면서 성능 변화 있는지 파악
-elif args.model == "GCN":
-    model_type = 'graph'
-    model = models.GCN_Net(in_channels = args.num_features, drop_out=args.drop_out).to(args.device)
+if args.model == 'transformer':
+    raise RuntimeError("transformer 구현하면 이거 지워주세요")
 
-elif args.model == "GAT":
-    model_type = 'graph'
-    model = models.GAT_Net(in_channels = args.num_features, drop_out=args.drop_out).to(args.device)
-
-elif args.model == "MLP":
-    model_type = 'non_graph'
+elif args.model == "mlp":
     model = models.MLPRegressor(input_size=args.num_features,
                     hidden_size=args.hidden_dim,
-                    output_size=2, drop_out=args.drop_out).to(args.device)
+                    output_size=args.output_size,
+                    drop_out=args.drop_out).to(args.device)
 
-elif args.model == "Linear":
-    model_type = 'non_graph'
+elif args.model in ["linear", "ridge"]:
     model = models.LinearRegression(input_size=args.num_features,
-                    out_channels=1).to(args.device)
+                    out_channels=args.output_size).to(args.device)
 
-elif args.model == "SVM" :
-    model_type = 'non_graph'
-    raise NotImplementedError
+elif args.model == "svr":
+    raise RuntimeError("SVR 구현하면 이거 지우기")
+
+
 
 print(f"Successfully prepare {args.model} model")
 # ---------------------------------------------------------------------------------------------
@@ -183,6 +194,7 @@ if args.criterion == 'MSE':
 
 elif args.criterion == "RMSE":
     criterion = utils.RMSELoss()
+
 
 # Validation / Test Criterion
 if args.eval_criterion == 'MAE':
@@ -208,12 +220,13 @@ else:
 
 
 ## Training Phase -----------------------------------------------------------------------------
-columns = ["ep", "lr", f"tr_loss({args.criterion})", 
-        f"val_data_loss({args.eval_criterion})", f"val_group_loss({args.eval_criterion})", f"val_worst_loss({args.eval_criterion})",
-        f"te_data_loss({args.eval_criterion})",  f"te_group_loss({args.eval_criterion})", f"te_worst_loss({args.eval_criterion})",
-        "time"]
+columns = ["ep", "lr",
+           f"tr_loss({args.criterion})",
+           f"val_loss({args.eval_criterion})",
+           f"te_loss({args.eval_criterion})",
+           "time"]
 
-best_val_data_loss = 9999
+best_val_loss = 9999
 
 for epoch in range(1, args.epochs + 1):
     time_ep = time.time()
@@ -223,59 +236,83 @@ for epoch in range(1, args.epochs + 1):
 
     total_tr_num_data = 0; total_val_num_data = 0; total_te_num_data = 0
 
-    tr_ground_truth_list = []; val_ground_truth_list = []; te_ground_truth_list = []
-
-    tr_predicted_list = []; val_predicted_list = []; te_predicted_list = []
+    tr_gt_y_list = []; val_gt_y_list = []; te_gt_y_list = []
+    tr_pred_y_list = []; val_pred_y_list = []; te_pred_y_list = []
+    
+    tr_gt_d_list = []; val_gt_d_list = []; te_gt_d_list = []
+    tr_pred_d_list = []; val_pred_d_list = []; te_pred_d_list = []
 
     for itr, data in enumerate(dataloader):
-        tr_loss, tr_num_data, tr_predicted, tr_ground_truth = utils.train(data, model, optimizer, criterion)
-        val_loss, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion)
-        te_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model, eval_criterion)
+        tr_batch_loss, tr_num_data, tr_predicted, tr_ground_truth = utils.train(data, model, optimizer, criterion, args.lamb)
+        val_batch_loss, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion)
+        te_batch_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model, eval_criterion)
 
-        tr_epoch_loss += tr_loss
-        val_epoch_loss += val_loss
-        te_epoch_loss += te_loss
+        tr_epoch_loss += tr_batch_loss
+        val_epoch_loss += val_batch_loss
+        te_epoch_loss += te_batch_loss
 
         total_tr_num_data += tr_num_data
         total_val_num_data += val_num_data
         total_te_num_data += te_num_data
 
-        tr_ground_truth_list += list(tr_ground_truth.cpu().numpy())
-        val_ground_truth_list += list(val_ground_truth.cpu().numpy())
-        te_ground_truth_list += list(te_ground_truth.cpu().numpy())
+        # Restore Prediction and Ground Truth
+        if args.scaling == "minmax":
+            tr_pred_y = utils.restore_minmax(tr_predicted[:, 0], dataset.miny, dataset.maxy)
+            tr_gt_y = utils.restore_minmax(tr_ground_truth[:, 0], dataset.miny, dataset.maxy)
+            tr_pred_d = utils.restore_minmax(tr_predicted[:, 1], dataset.mind, dataset.maxd)
+            tr_gt_d = utils.restore_minmax(tr_ground_truth[:, 1], dataset.mind, dataset.maxd)
+            
+            val_pred_y = utils.restore_minmax(val_predicted[:, 0], dataset.miny, dataset.maxy)
+            val_gt_y = utils.restore_minmax(val_ground_truth[:, 0], dataset.miny, dataset.maxy)
+            val_pred_d = utils.restore_minmax(val_predicted[:, 1], dataset.mind, dataset.maxd)
+            val_gt_d = utils.restore_minmax(val_ground_truth[:, 1], dataset.mind, dataset.maxd)
+            
+            te_pred_y = utils.restore_minmax(te_predicted[:, 0], dataset.miny, dataset.maxy)
+            te_gt_y = utils.restore_minmax(te_ground_truth[:, 0], dataset.miny, dataset.maxy)
+            te_pred_d = utils.restore_minmax(te_predicted[:, 1], dataset.mind, dataset.maxd)
+            te_gt_d = utils.restore_minmax(te_ground_truth[:, 1], dataset.mind, dataset.maxd) 
+                      
+        elif args.scaling == "normalization":
+            tr_pred_y = utils.restore_meanvar(tr_predicted[:, 0], dataset.miny, dataset.maxy)
+            tr_gt_y = utils.restore_meanvar(tr_ground_truth[:, 0], dataset.miny, dataset.maxy)
+            tr_pred_d = utils.restore_meanvar(tr_predicted[:, 1], dataset.mind, dataset.maxd)
+            tr_gt_d = utils.restore_meanvar(tr_ground_truth[:, 1], dataset.mind, dataset.maxd)
+            
+            val_pred_y = utils.restore_meanvar(val_predicted[:, 0], dataset.miny, dataset.maxy)
+            val_gt_y = utils.restore_meanvar(val_ground_truth[:, 0], dataset.miny, dataset.maxy)
+            val_pred_d = utils.restore_meanvar(val_predicted[:, 1], dataset.mind, dataset.maxd)
+            val_gt_d = utils.restore_meanvar(val_ground_truth[:, 1], dataset.mind, dataset.maxd)
+            
+            te_pred_y = utils.restore_meanvar(te_predicted[:, 0], dataset.miny, dataset.maxy)
+            te_gt_y = utils.restore_meanvar(te_ground_truth[:, 0], dataset.miny, dataset.maxy)
+            te_pred_d = utils.restore_meanvar(te_predicted[:, 1], dataset.mind, dataset.maxd)
+            te_gt_d = utils.restore_meanvar(te_ground_truth[:, 1], dataset.mind, dataset.maxd)
+        
+        
+        tr_pred_y_list += list(tr_pred_y.cpu().detach().numpy())
+        tr_gt_y_list += list(tr_gt_y.cpu().detach().numpy())
+        tr_pred_d_list += list(tr_pred_d.cpu().detach().numpy())
+        tr_gt_d_list += list(tr_gt_d.cpu().detach().numpy())
+        
+        val_pred_y_list += list(val_pred_y.cpu().detach().numpy())
+        val_gt_y_list += list(val_gt_y.cpu().detach().numpy())
+        val_pred_d_list += list(val_pred_d.cpu().detach().numpy())
+        val_gt_d_list += list(val_gt_d.cpu().detach().numpy())
 
-        tr_predicted_list += list(tr_predicted.detach().cpu().numpy())
-        val_predicted_list += list(val_predicted.detach().cpu().numpy())
-        te_predicted_list += list(te_predicted.detach().cpu().numpy())
+        te_pred_y_list += list(te_pred_y.cpu().detach().numpy())
+        te_gt_y_list += list(te_gt_y.cpu().detach().numpy())
+        te_pred_d_list += list(te_pred_d.cpu().detach().numpy())
+        te_gt_d_list += list(te_gt_d.cpu().detach().numpy())
 
-    # Data Loss
-    tr_avg_loss = tr_epoch_loss / total_tr_num_data
-    val_avg_loss = val_epoch_loss / total_val_num_data
-    te_avg_loss = te_epoch_loss / total_te_num_data
+
+    # Calculate Epoch Loss
+    tr_loss = tr_epoch_loss / total_tr_num_data
+    val_loss = val_epoch_loss / total_val_num_data
+    te_loss = te_epoch_loss / total_te_num_data
     
-    tr_ground_truth_list = np.asarray(tr_ground_truth_list)
-    val_ground_truth_list = np.asarray(val_ground_truth_list)
-    te_ground_truth_list = np.asarray(te_ground_truth_list)
-
-    tr_predicted_list = np.asarray(tr_predicted_list)
-    val_predicted_list = np.asarray(val_predicted_list)
-    te_predicted_list = np.asarray(te_predicted_list)
-    
-
-    # Calculate Validation Group loss
-    val_group_loss_dict, val_group_loss = utils.cal_group_loss(val_ground_truth_list, val_predicted_list, args.eval_criterion)
-    val_worst_loss = max(val_group_loss_dict.values())
-
-    # Calculate Test Group loss
-    te_group_loss_dict, te_group_loss = utils.cal_group_loss(te_ground_truth_list, te_predicted_list, args.eval_criterion)
-    te_worst_loss = max(te_group_loss_dict.values())
-
     time_ep = time.time() - time_ep
 
-    values = [epoch, lr, tr_avg_loss,
-            val_avg_loss, val_group_loss, val_worst_loss,
-            te_avg_loss, te_group_loss, te_worst_loss,
-            time_ep,]
+    values = [epoch, lr, tr_loss, val_loss, te_loss, time_ep,]
 
     table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
     if epoch % 20 == 0 or epoch == 1:
@@ -285,64 +322,56 @@ for epoch in range(1, args.epochs + 1):
         table = table.split("\n")[2]
     print(table)
 
-    if args.scheduler is not None:
+    if args.scheduler == 'cos_anneal':
         scheduler.step()
 
     # Save Best Model (Early Stopping)
-    if val_avg_loss < best_val_data_loss:
+    if val_loss < best_val_loss:
         best_epoch = epoch
-        best_val_data_loss = val_avg_loss
-        best_val_group_loss = val_group_loss
-        best_val_worst_loss = val_worst_loss
-
-        best_te_data_loss = te_avg_loss
-        best_te_group_loss = te_group_loss
-        best_te_worst_loss = te_worst_loss
-
+        best_val_loss = val_loss
+        best_te_loss = te_loss
         
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
-        utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_val.pt",
+        utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt",
                             epoch = epoch,
                             state_dict = model.state_dict(),
                             optimizer = optimizer.state_dict(),
                             )
+        if args.save_pred:
+            # save prediction and ground truth as csv
+            val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
+                            'val_ground_truth_y':val_gt_y_list,
+                            'val_pred_d' : val_pred_d_list,
+                            'val_ground_truth_d' : val_gt_d_list})
+            val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val_pred.csv")
 
-        # # save prediction and ground truth as csv
-        # val_df = pd.DataFrame({'val_pred':val_predicted_list,
-        #                 'val_ground_truth':val_ground_truth_list})
-        # val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_val_pred.csv")
-
-        # te_df = pd.DataFrame({'te_pred' : te_predicted_list,
-        #                 'te_ground_truth' : te_ground_truth_list})                
-        # te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_te_pred.csv")
+            te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
+                            'te_ground_truth_y':te_gt_y_list,
+                            'te_pred_d' : te_pred_d_list,
+                            'te_ground_truth_d' : te_gt_d_list})                
+            te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv")
         
     
-    if args.ignore_wandb == False:
+    if not args.ignore_wandb:
         wandb.log({"lr" : lr,
-                "Training loss" : tr_avg_loss,
-                "Validation data loss": val_avg_loss, "Validation group loss":val_group_loss, "Validation worst loss" : val_worst_loss, 
-                "Test data loss" : te_avg_loss, "Test group loss" : te_group_loss, "Test worst loss" : te_worst_loss,
+                "tr_loss" : tr_loss,
+                "val_loss": val_loss,
+                "te_loss" : te_loss,
                 })
 # ---------------------------------------------------------------------------------------------
 
 
 
 ## Print Best Model ---------------------------------------------------------------------------
-print(f"Best {args.model} achieved {best_te_data_loss} on {best_epoch} epoch!!")
-print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_val.pt'!!")
+print(f"Best {args.model} achieved {best_te_loss} on {best_epoch} epoch!!")
+print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt'!!")
 
 if args.ignore_wandb == False:
     wandb.run.summary["best_epoch"]  = best_epoch
-    wandb.run.summary["best_val_data_loss"] = best_val_data_loss
-    wandb.run.summary["best_val_group_loss"] = best_val_group_loss
-    wandb.run.summary["best_val_worst_loss"] = best_val_worst_loss
-
-    wandb.run.summary["best_test_loss"] = best_te_data_loss
-    wandb.run.summary["best_test_group_loss"] = best_te_group_loss
-    wandb.run.summary["best_test_worst_loss"] = best_te_worst_loss
-
-    wandb.run.summary["Number of Traing Data"] = total_tr_num_data
-    wandb.run.summary["Number of Validation Data"] : total_val_num_data
-    wandb.run.summary["Number of Test Data"] : total_te_num_data
+    wandb.run.summary["best_val_loss"] = best_val_loss
+    wandb.run.summary["best_te_loss"] = best_te_loss
+    wandb.run.summary["tr_dat_num"] = total_tr_num_data
+    wandb.run.summary["val_dat_num"] : total_val_num_data
+    wandb.run.summary["te_dat_num"] : total_te_num_data
 # ---------------------------------------------------------------------------------------------
