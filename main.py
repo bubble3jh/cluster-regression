@@ -11,6 +11,7 @@ import tabulate
 import utils, models
 import wandb
 from torch.utils.data import DataLoader
+import pdb
 
 # import warnings
 # warnings.filterwarnings('ignore')
@@ -30,7 +31,7 @@ parser.add_argument("--ignore_wandb", action='store_true',
 parser.add_argument(
     "--data_path",
     type=str,
-    default='./data/data_norm.csv',
+    default='./data/data_final_mod.csv',
     help="path to datasets location",)
 #----------------------------------------------------------------
 
@@ -48,8 +49,8 @@ parser.add_argument("--save_path",
 
 parser.add_argument(
     "--num_features",
-    type=int, default=25,
-    help="feature size (default : 25)"
+    type=int, default=24,
+    help="feature size (default : 24)"
 )
 
 parser.add_argument(
@@ -138,6 +139,7 @@ if args.ignore_wandb == False:
 #                                         model_name = args.model)
 data = pd.read_csv(args.data_path)
 dataset = utils.Tabledata(data)
+# dataset = utils.Seqdata(data)
 dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
 print("Successfully load data!")
 #-------------------------------------------------------------------------------------
@@ -159,7 +161,7 @@ elif args.model == "MLP":
     model_type = 'non_graph'
     model = models.MLPRegressor(input_size=args.num_features,
                     hidden_size=args.hidden_dim,
-                    output_size=1, drop_out=args.drop_out).to(args.device)
+                    output_size=2, drop_out=args.drop_out).to(args.device)
 
 elif args.model == "Linear":
     model_type = 'non_graph'
@@ -306,14 +308,14 @@ for epoch in range(1, args.epochs + 1):
                             optimizer = optimizer.state_dict(),
                             )
 
-        # save prediction and ground truth as csv
-        val_df = pd.DataFrame({'val_pred':val_predicted_list,
-                        'val_ground_truth':val_ground_truth_list})
-        val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_val_pred.csv")
+        # # save prediction and ground truth as csv
+        # val_df = pd.DataFrame({'val_pred':val_predicted_list,
+        #                 'val_ground_truth':val_ground_truth_list})
+        # val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_val_pred.csv")
 
-        te_df = pd.DataFrame({'te_pred' : te_predicted_list,
-                        'te_ground_truth' : te_ground_truth_list})                
-        te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_te_pred.csv")
+        # te_df = pd.DataFrame({'te_pred' : te_predicted_list,
+        #                 'te_ground_truth' : te_ground_truth_list})                
+        # te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.target_order}_best_te_pred.csv")
         
     
     if args.ignore_wandb == False:

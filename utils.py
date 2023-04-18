@@ -13,6 +13,46 @@ from torch.utils.data import Dataset
 
 class Tabledata(Dataset):
     def __init__(self, data):
+        for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
+            # minmax_col(data, c)
+            meanvar_col(data, c)
+        for i in data['cluster'].unique():
+            max_diff_days = data[data['cluster'] == i]['diff_days'].max()
+            data.loc[data['cluster'] == i, 'd'] = max_diff_days
+        # miny, maxy = minmax_col(data,"y")
+        # mind, maxd = minmax_col(data,"d")
+        meany, vary = meanvar_col(data, "y")
+        meand, vard = meanvar_col(data, "d")
+        self.binary_X = data.iloc[:, 1:4].values.astype('float32')
+        self.cont_X = data.iloc[:, 4:9].values.astype('float32') # diff_days 는 사용 x
+        self.cat_X = data.iloc[:, 10:14].astype('category')
+        self.y = data.iloc[:, -2:].values.astype('float32')
+
+        # 범주형 데이터 처리 - 0~n 까지로 맞춰줌
+        self.cat_cols = self.cat_X.columns
+        self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
+        self.cat_X = self.cat_X.apply(lambda x: x.cat.codes)
+        self.cat_X = torch.from_numpy(self.cat_X.to_numpy()).long()
+        self.embeddings = nn.ModuleList([nn.Embedding(len(self.cat_map[col]), 4) for col in self.cat_cols])
+
+    def __len__(self):
+        return len(self.cont_X)
+
+    def __getitem__(self, index):
+        cont_X = torch.from_numpy(self.cont_X[index])
+        cat_X = self.cat_X[index]
+        # batch size 가 1일 때 예외 처리
+        if len(cat_X.shape) == 1:
+            embeddings = [embedding(cat_X[i].unsqueeze(0)) for i, embedding in enumerate(self.embeddings)]
+        else:
+            embeddings = [embedding(cat_X[:, i]) for i, embedding in enumerate(self.embeddings)]
+        cat_X = torch.cat(embeddings, 1).squeeze()
+        binary_X = torch.from_numpy(self.binary_X[index])
+        y = torch.tensor(self.y[index])
+        return binary_X, cont_X, cat_X, y
+    
+class Seqdata(Dataset):
+    def __init__(self, data):
         self.binary_X = data.iloc[:, 1:4].values.astype('float32')
         self.cont_X = data.iloc[:, 4:10].values.astype('float32')
         self.cat_X = data.iloc[:, 10:14].astype('category')
@@ -40,6 +80,24 @@ class Tabledata(Dataset):
         binary_X = torch.from_numpy(self.binary_X[index])
         y = torch.tensor(self.y[index])
         return binary_X, cont_X, cat_X, y
+    
+def minmax_col(data,name):
+    minval , maxval = data[name].min(), data[name].max()
+    data[name]=(data[name]-data[name].min())/(data[name].max()-data[name].min())
+    return minval, maxval
+
+def resotre_minmax_data(data,name,minv,maxv):
+    data[name] = (data[name] * (maxv - minv)) + minv
+
+def meanvar_col(data,name):
+    mean_val = data[name].mean()
+    std_val = data[name].var()
+    data[name]=(data[name]-data[name].mean())/data[name].var()
+    return mean_val, std_val
+
+def resotre_meanvar_col(data, name, mean, var):
+    data[name] = data[name] * var + mean
+    return data[name]
 
 def set_seed(random_seed=1000):
     '''
@@ -64,12 +122,12 @@ def save_checkpoint(file_path, epoch, **kwargs):
 
 
 ## Data----------------------------------------------------------------------------------------
-def min_max_scale(df, col, min = 0, max = 37):
+def min_max_scale(data, col, min = 0, max = 37):
     '''
     Adapt Min-Max Scaling
     '''
-    df[col] = (df[col] - min) / (max - min)
-    return df[col]
+    data[col] = (data[col] - min) / (max - min)
+    return data[col]
 
 
 def restore_min_max(scaled_dat, min = 0, max = 37):
@@ -102,13 +160,13 @@ def full_load_data(data_path = './data/20221122_raw_data_utf-8.csv',
         - y_min : minimum value of y label 
         - y_max : maximum value of y label
     '''
-    df_dat, unique_group = load_data(data_path = data_path, classification = classification)
-    df_dat, y_min, y_max = scaling_y(df = df_dat)
+    data_dat, unique_group = load_data(data_path = data_path, classification = classification)
+    data_dat, y_min, y_max = scaling_y(data = data_dat)
 
     # aggregate group (for each graph)
-    group_df = df_dat.groupby("transmission_route").agg(list)
+    group_data = data_dat.groupby("transmission_route").agg(list)
 
-    data_x_list, data_edge_list, data_y_list, data_order_list, num_graph = split_graphs(group_df = group_df, unique_group = unique_group, num_features = num_features, model_name = model_name)
+    data_x_list, data_edge_list, data_y_list, data_order_list, num_graph = split_graphs(group_data = group_data, unique_group = unique_group, num_features = num_features, model_name = model_name)
 
     new_data_x_list, new_data_edge_list, new_data_y_list, new_data_order_list, new_data_tr_mask_list, new_data_val_mask_list, new_data_te_mask_list = masking(data_x_list = data_x_list,
                                                                                                                             data_edge_list = data_edge_list,
@@ -153,10 +211,10 @@ def full_load_data(data_path = './data/20221122_raw_data_utf-8.csv',
 
 def load_data(data_path='./data/20221122_raw_data_utf-8.csv', classification = True):
     # load data
-    df = pd.read_csv(data_path, index_col=0)       # [8844, 37]
+    data = pd.read_csv(data_path, index_col=0)       # [8844, 37]
 
     # Making y label
-    cdc_count = df['index_id_cdc'].value_counts()
+    cdc_count = data['index_id_cdc'].value_counts()
     cdc_count = cdc_count.to_frame().reset_index()
     cdc_count.columns = ['id_inch', 'index_id_cdc_num']
 
@@ -164,34 +222,34 @@ def load_data(data_path='./data/20221122_raw_data_utf-8.csv', classification = T
         over = cdc_count['index_id_cdc_num']>=6
         cdc_count['index_id_cdc_num'][over] = 6
 
-    df = pd.merge(df, cdc_count, how='left', on='id_inch')      # left outer join
-    df['index_id_cdc_num'] = df['index_id_cdc_num'].fillna(0)   # 결측값 0으로 대치
+    data = pd.merge(data, cdc_count, how='left', on='id_inch')      # left outer join
+    data['index_id_cdc_num'] = data['index_id_cdc_num'].fillna(0)   # 결측값 0으로 대치
 
 
     # Delete nan rows
-    df.dropna(how='any', subset=['contact_n'], inplace=True)    # 차수가 없는것 삭제
-    df = df.drop(df[df.contact_n == '?'].index)
+    data.dropna(how='any', subset=['contact_n'], inplace=True)    # 차수가 없는것 삭제
+    data = data.drop(data[data.contact_n == '?'].index)
 
-    df.dropna(how='any', subset=['sex'], inplace=True)          # 성별 없는것 삭제
+    data.dropna(how='any', subset=['sex'], inplace=True)          # 성별 없는것 삭제
 
-    df.dropna(how='any', subset=['a1','a2','a3','a4','a5','a6','a7','a8','a9','a10','a11','a12','a13','a14','a15'], inplace=True)   # 증상 (a1-15) 없는것 삭제
+    data.dropna(how='any', subset=['a1','a2','a3','a4','a5','a6','a7','a8','a9','a10','a11','a12','a13','a14','a15'], inplace=True)   # 증상 (a1-15) 없는것 삭제
 
     # index reset
-    df = df.reset_index(drop=True)                        # [1154, 38]
-    unique_group = pd.unique(df['transmission_route'])    # 155
-    return df, unique_group
+    data = data.reset_index(drop=True)                        # [1154, 38]
+    unique_group = pd.unique(data['transmission_route'])    # 155
+    return data, unique_group
 
 
-def scaling_y(df):
+def scaling_y(data):
     # normalizing y label (min-max scaling)
-    y_min = df['index_id_cdc_num'].min()
-    y_max = df['index_id_cdc_num'].max()
+    y_min = data['index_id_cdc_num'].min()
+    y_max = data['index_id_cdc_num'].max()
 
-    df['index_id_cdc_num'] = min_max_scale(df, 'index_id_cdc_num', y_min, y_max)
-    return df, y_min, y_max
+    data['index_id_cdc_num'] = min_max_scale(data, 'index_id_cdc_num', y_min, y_max)
+    return data, y_min, y_max
 
 
-def split_graphs(group_df, unique_group, num_features, model_name):
+def split_graphs(group_data, unique_group, num_features, model_name):
     num_graph = len(unique_group)                       # number of graph (155)
     data_x_list = []                                    # node별 feature list (17)
     data_y_list = []                                    # node별 y (바이러스를 전파시킬 인원수)
@@ -199,7 +257,7 @@ def split_graphs(group_df, unique_group, num_features, model_name):
     data_direct_list = []                               # 선행확진자 (0, 1)
     data_order_list = []                                # 차수 # 1,2,3,4
     for itr in range(num_graph):
-        temp_data = group_df.iloc[itr]
+        temp_data = group_data.iloc[itr]
         num_person = len(temp_data['id_inch'])
         # Birth: 0 if birth<1982 1 else
         # Gender: 0 if male 1 else 
@@ -484,9 +542,11 @@ def train(data, model, optimizer, criterion):
     y=y.cuda()
     optimizer.zero_grad()
     batch_num = data_x.shape[0]
-    out = model(data_x).squeeze()
+    out = model(data_x)
 
-    loss = criterion(out, y)
+    loss1 = criterion(out[:,0], y[:,0])
+    loss2 = criterion(out[:,1], y[:,1])
+    loss = loss1 + loss2
     if not torch.isnan(loss):
       loss.backward()
       optimizer.step()
@@ -504,9 +564,12 @@ def valid(data, model, eval_criterion):
     data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
 
     batch_num = data_x.shape[0]
-    out = model(data_x).squeeze()
+    out = model(data_x)
 
-    loss = eval_criterion(out, y)
+    loss1 = eval_criterion(out[:,0], y[:,0])
+    loss2 = eval_criterion(out[:,1], y[:,1])
+    # loss = eval_criterion(out, y)
+    loss = loss1 + loss2
     if not torch.isnan(loss):
         return loss.item(),batch_num, out, y
     else:
@@ -543,9 +606,12 @@ def test(data, model, eval_criterion):
     data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
 
     batch_num = data_x.shape[0]
-    out = model(data_x).squeeze()
+    out = model(data_x)
 
-    loss = eval_criterion(out, y)
+    loss1 = eval_criterion(out[:,0], y[:,0])
+    loss2 = eval_criterion(out[:,1], y[:,1])
+    # loss = eval_criterion(out, y)
+    loss = loss1 + loss2
     if not torch.isnan(loss):
         return loss.item(),batch_num, out, y
     else:

@@ -96,7 +96,7 @@ class MagNet(nn.Module):
     
 
 class MLPRegressor(nn.Module):
-    def __init__(self, input_size=25, hidden_size=64, output_size=1, drop_out=0.0):
+    def __init__(self, input_size=24, hidden_size=64, output_size=2, drop_out=0.0):
         super().__init__()
         self.fc1 = nn.Linear(input_size, hidden_size, bias=True)
         self.fc2 = nn.Linear(hidden_size, output_size, bias=True)
