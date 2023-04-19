@@ -73,7 +73,7 @@ class Seqdata(Dataset):
         data=data[['cluster', 'age',  'CT_R', 'CT_E', 'gender', 'is_korean', 'primary case', 'job_idx','rep_idx', # patient datas
                    'dis', 'danger', 'place_idx', 'add_idx', 'y', 'diff_days', 'sub_y']]                           # cluster datas
         data = data.sort_values(by=["cluster", "diff_days"], ascending=[True, True])
-        
+        print(data)
         self.cont_P = data.iloc[:, 1:4].values.astype('float32') 
         self.disc_P = data.iloc[:, 4:9].astype('category')
         self.cont_C = data.iloc[:, 9:11].values.astype('float32') 
@@ -100,17 +100,6 @@ class Seqdata(Dataset):
         cont_P = torch.from_numpy(self.cont_P[index])
         disc_C = self.disc_C[index]
         disc_P = self.disc_P[index]
-        # # batch size 가 1일 때 예외 처리
-        # if len(disc_C.shape) == 1:
-        #     embeddings = [embedding(disc_C[i].unsqueeze(0)) for i, embedding in enumerate(self.embeddings)]
-        # else:
-        #     embeddings = [embedding(disc_C[:, i]) for i, embedding in enumerate(self.embeddings)]
-        # disc_C = torch.cat(embeddings, 1).squeeze()
-        # if len(disc_P.shape) == 1:
-        #     embeddings = [embedding(disc_P[i].unsqueeze(0)) for i, embedding in enumerate(self.embeddings)]
-        # else:
-        #     embeddings = [embedding(disc_P[:, i]) for i, embedding in enumerate(self.embeddings)]
-        # disc_P = torch.cat(embeddings, 1).squeeze()
         y = torch.tensor(self.y[index])
         return cont_P, disc_P, cont_C, disc_C, y
 
