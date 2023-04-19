@@ -14,7 +14,8 @@ from torch.utils.data import Dataset
 
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
-    def __init__(self, data, scale='minmax'):
+    def __init__(self, data, scale='minmax', emb=True):
+        self.emb = emb
         for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
             # minmax_col(data, c)
             meanvar_col(data, c)
@@ -32,7 +33,6 @@ class Tabledata(Dataset):
         self.cont_X = data.iloc[:, 4:9].values.astype('float32') # diff_days 는 사용 x
         self.cat_X = data.iloc[:, 10:14].astype('category')
         self.y = data.iloc[:, -2:].values.astype('float32')
-
         # 범주형 데이터 처리 - 0~n 까지로 맞춰줌
         self.cat_cols = self.cat_X.columns
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
@@ -46,12 +46,13 @@ class Tabledata(Dataset):
     def __getitem__(self, index):
         cont_X = torch.from_numpy(self.cont_X[index])
         cat_X = self.cat_X[index]
-        # batch size 가 1일 때 예외 처리
-        if len(cat_X.shape) == 1:
-            embeddings = [embedding(cat_X[i].unsqueeze(0)) for i, embedding in enumerate(self.embeddings)]
-        else:
-            embeddings = [embedding(cat_X[:, i]) for i, embedding in enumerate(self.embeddings)]
-        cat_X = torch.cat(embeddings, 1).squeeze()
+        if self.emb :
+            # batch size 가 1일 때 예외 처리
+            if len(cat_X.shape) == 1:
+                embeddings = [embedding(cat_X[i].unsqueeze(0)) for i, embedding in enumerate(self.embeddings)]
+            else:
+                embeddings = [embedding(cat_X[:, i]) for i, embedding in enumerate(self.embeddings)]
+            cat_X = torch.cat(embeddings, 1).squeeze()
         binary_X = torch.from_numpy(self.binary_X[index])
         y = torch.tensor(self.y[index])
         return binary_X, cont_X, cat_X, y
@@ -151,7 +152,7 @@ def train(data, model, optimizer, criterion, lamb=0.0):
         data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
         y=y.cuda()
         optimizer.zero_grad()
-        batch_num = data_x.shape[0]
+        batch_num = cont_X.shape[0]
         out = model(data_x)
         
         loss_d = criterion(out[:,0], y[:,0])
@@ -201,8 +202,8 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
     '''
     model.eval()
     binary_X, cont_X, cat_X, y = data
-    y=y.cuda()
     data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
+    y=y.cuda()
 
     batch_num = data_x.shape[0]
     out = model(data_x)
@@ -234,8 +235,8 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
 def test(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):    
     model.eval()
     binary_X, cont_X, cat_X, y = data
-    y=y.cuda()
     data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
+    y=y.cuda()
 
     batch_num = data_x.shape[0]
     out = model(data_x)

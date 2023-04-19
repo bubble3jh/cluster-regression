@@ -94,6 +94,8 @@ parser.add_argument(
     type=float, default=0.0,
     help="Dropout Rate (Default : 0)"
 )
+
+parser.add_argument("--emb", action='store_false',  help="MLP embedding (Default : True)")
 #----------------------------------------------------------------
 
 # Criterion -----------------------------------------------------
@@ -157,7 +159,7 @@ if args.ignore_wandb == False:
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
 if args.model != "transformer":
-    dataset = utils.Tabledata(data, args.scaling)
+    dataset = utils.Tabledata(data, args.scaling, args.emb)
 else:
     dataset = utils.Seqdata(data)
 dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
@@ -171,6 +173,8 @@ if args.model == 'transformer':
                     output_size=args.output_size).to(args.device)
    
 elif args.model == "mlp":
+    if not args.emb:
+        args.num_features = 12
     model = models.MLPRegressor(input_size=args.num_features,
                     hidden_size=args.hidden_dim,
                     output_size=args.output_size,
