@@ -23,11 +23,11 @@ class Tabledata(Dataset):
             data.loc[data['cluster'] == i, 'd'] = max_diff_days
         
         if scale == 'minmax':
-            self.miny, self.maxy = minmax_col(data,"y")
-            self.mind, self.maxd = minmax_col(data,"d")
+            self.a_y, self.b_y = minmax_col(data,"y")
+            self.a_d, self.b_d = minmax_col(data,"d")
         elif scale =='normalization':
-            self.meany, self.vary = meanvar_col(data, "y")
-            self.meand, self.vard = meanvar_col(data, "d")
+            self.a_y, self.b_y = meanvar_col(data, "y")
+            self.a_d, self.b_d = meanvar_col(data, "d")
         self.binary_X = data.iloc[:, 1:4].values.astype('float32')
         self.cont_X = data.iloc[:, 4:9].values.astype('float32') # diff_days 는 사용 x
         self.cat_X = data.iloc[:, 10:14].astype('category')
@@ -89,8 +89,9 @@ class Seqdata(Dataset):
         return binary_X, cont_X, cat_X, y
 '''
 
+
 ## MinMax Scaling Functions ------------------------------------
-def minmax_col(data,name):
+def minmax_col(data, name):
     minval , maxval = data[name].min(), data[name].max()
     data[name]=(data[name]-data[name].min())/(data[name].max()-data[name].min())
     return minval, maxval
@@ -101,7 +102,7 @@ def restore_minmax(data, minv, maxv):
 # ---------------------------------------------------------------
 
 ## Normalization Scaling Functions ---------------------------------
-def meanvar_col(data,name):
+def meanvar_col(data, name):
     mean_val = data[name].mean()
     std_val = data[name].var()
     data[name]=(data[name]-data[name].mean())/data[name].var()
@@ -138,9 +139,9 @@ def train(data, model, optimizer, criterion, lamb=0.0):
     batch_num = data_x.shape[0]
     out = model(data_x)
     
-    loss1 = criterion(out[:,0], y[:,0])
-    loss2 = criterion(out[:,1], y[:,1])
-    loss = loss1 + loss2
+    loss_d = criterion(out[:,0], y[:,0])
+    loss_y = criterion(out[:,1], y[:,1])
+    loss = loss_d + loss_y
     
     # Add Penalty term for ridge regression
     if lamb != 0.0:
@@ -156,7 +157,13 @@ def train(data, model, optimizer, criterion, lamb=0.0):
 
 ## Validation --------------------------------------------------------------------------------
 @torch.no_grad()
-def valid(data, model, eval_criterion):
+def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
+    '''
+    a_y : min_y or mean_y
+    b_y : max_y or var_y
+    a_d : min_d or min_d
+    b_d : max_d or var_d
+    '''
     model.eval()
     binary_X, cont_X, cat_X, y = data
     y=y.cuda()
@@ -164,10 +171,22 @@ def valid(data, model, eval_criterion):
 
     batch_num = data_x.shape[0]
     out = model(data_x)
-
-    loss1 = eval_criterion(out[:,0], y[:,0])
-    loss2 = eval_criterion(out[:,1], y[:,1])
-    loss = loss1 + loss2
+    
+    if scaling=="minmax":
+        pred_y = restore_minmax(out[:, 0], a_y, b_y)
+        pred_d = restore_minmax(out[:, 1], a_d, b_d)
+        gt_y = restore_minmax(y[:,0], a_y, b_y)
+        gt_d = restore_minmax(y[:,1], a_d, b_d)
+        
+    elif scaling == "normalization":
+        pred_y = restore_meanvar(out[:, 0], a_y, b_y)
+        pred_d = restore_meanvar(out[:, 1], a_d, b_d)
+        gt_y = restore_meanvar(y[:,0], a_y, b_y)
+        gt_d = restore_meanvar(y[:,1], a_d, b_d)
+        
+    loss_y = eval_criterion(pred_y, gt_y)
+    loss_d = eval_criterion(pred_d, gt_d)
+    loss = loss_y + loss_d
     if not torch.isnan(loss):
         return loss.item(), batch_num, out, y
     else:
@@ -177,7 +196,7 @@ def valid(data, model, eval_criterion):
 
 ## Test ----------------------------------------------------------------------------------------
 @torch.no_grad()
-def test(data, model, eval_criterion):    
+def test(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):    
     model.eval()
     binary_X, cont_X, cat_X, y = data
     y=y.cuda()
@@ -185,11 +204,22 @@ def test(data, model, eval_criterion):
 
     batch_num = data_x.shape[0]
     out = model(data_x)
-
-    loss1 = eval_criterion(out[:,0], y[:,0])
-    loss2 = eval_criterion(out[:,1], y[:,1])
-    # loss = eval_criterion(out, y)
-    loss = loss1 + loss2
+    
+    if scaling=="minmax":
+        pred_y = restore_minmax(out[:, 0], a_y, b_y)
+        pred_d = restore_minmax(out[:, 1], a_d, b_d)
+        gt_y = restore_minmax(y[:,0], a_y, b_y)
+        gt_d = restore_minmax(y[:,1], a_d, b_d)
+        
+    elif scaling == "normalization":
+        pred_y = restore_meanvar(out[:, 0], a_y, b_y)
+        pred_d = restore_meanvar(out[:, 1], a_d, b_d)
+        gt_y = restore_meanvar(y[:,0], a_y, b_y)
+        gt_d = restore_meanvar(y[:,1], a_d, b_d)
+        
+    loss_y = eval_criterion(pred_y, gt_y)
+    loss_d = eval_criterion(pred_d, gt_d)
+    loss = loss_y + loss_d
     if not torch.isnan(loss):
         return loss.item(), batch_num, out, y
     else:

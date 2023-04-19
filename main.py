@@ -158,6 +158,7 @@ if args.ignore_wandb == False:
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
 dataset = utils.Tabledata(data, args.scaling)
+
 # dataset = utils.Seqdata(data)
 dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 print("Successfully load data!")
@@ -244,8 +245,12 @@ for epoch in range(1, args.epochs + 1):
 
     for itr, data in enumerate(dataloader):
         tr_batch_loss, tr_num_data, tr_predicted, tr_ground_truth = utils.train(data, model, optimizer, criterion, args.lamb)
-        val_batch_loss, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion)
-        te_batch_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model, eval_criterion)
+        val_batch_loss, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
+                                                                            args.scaling, dataset.a_y, dataset.b_y,
+                                                                            dataset.a_d, dataset.b_d)
+        te_batch_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model, eval_criterion,
+                                                                            args.scaling, dataset.a_y, dataset.b_y,
+                                                                            dataset.a_d, dataset.b_d)
 
         tr_epoch_loss += tr_batch_loss
         val_epoch_loss += val_batch_loss
@@ -257,52 +262,31 @@ for epoch in range(1, args.epochs + 1):
 
         # Restore Prediction and Ground Truth
         if args.scaling == "minmax":
-            tr_pred_y = utils.restore_minmax(tr_predicted[:, 0], dataset.miny, dataset.maxy)
-            tr_gt_y = utils.restore_minmax(tr_ground_truth[:, 0], dataset.miny, dataset.maxy)
-            tr_pred_d = utils.restore_minmax(tr_predicted[:, 1], dataset.mind, dataset.maxd)
-            tr_gt_d = utils.restore_minmax(tr_ground_truth[:, 1], dataset.mind, dataset.maxd)
-            
-            val_pred_y = utils.restore_minmax(val_predicted[:, 0], dataset.miny, dataset.maxy)
-            val_gt_y = utils.restore_minmax(val_ground_truth[:, 0], dataset.miny, dataset.maxy)
-            val_pred_d = utils.restore_minmax(val_predicted[:, 1], dataset.mind, dataset.maxd)
-            val_gt_d = utils.restore_minmax(val_ground_truth[:, 1], dataset.mind, dataset.maxd)
-            
-            te_pred_y = utils.restore_minmax(te_predicted[:, 0], dataset.miny, dataset.maxy)
-            te_gt_y = utils.restore_minmax(te_ground_truth[:, 0], dataset.miny, dataset.maxy)
-            te_pred_d = utils.restore_minmax(te_predicted[:, 1], dataset.mind, dataset.maxd)
-            te_gt_d = utils.restore_minmax(te_ground_truth[:, 1], dataset.mind, dataset.maxd) 
+            tr_pred_y = utils.restore_minmax(tr_predicted[:, 0], dataset.a_y, dataset.b_y)
+            tr_gt_y = utils.restore_minmax(tr_ground_truth[:, 0], dataset.a_y, dataset.b_y)
+            tr_pred_d = utils.restore_minmax(tr_predicted[:, 1], dataset.a_d, dataset.b_d)
+            tr_gt_d = utils.restore_minmax(tr_ground_truth[:, 1], dataset.a_d, dataset.b_d)
                       
         elif args.scaling == "normalization":
-            tr_pred_y = utils.restore_meanvar(tr_predicted[:, 0], dataset.meany, dataset.vary)
-            tr_gt_y = utils.restore_meanvar(tr_ground_truth[:, 0], dataset.meany, dataset.vary)
-            tr_pred_d = utils.restore_meanvar(tr_predicted[:, 1], dataset.meand, dataset.vard)
-            tr_gt_d = utils.restore_meanvar(tr_ground_truth[:, 1], dataset.meand, dataset.vard)
-            
-            val_pred_y = utils.restore_meanvar(val_predicted[:, 0], dataset.meany, dataset.vary)
-            val_gt_y = utils.restore_meanvar(val_ground_truth[:, 0], dataset.meany, dataset.vary)
-            val_pred_d = utils.restore_meanvar(val_predicted[:, 1], dataset.meand, dataset.vard)
-            val_gt_d = utils.restore_meanvar(val_ground_truth[:, 1], dataset.meand, dataset.vard)
-            
-            te_pred_y = utils.restore_meanvar(te_predicted[:, 0], dataset.meany, dataset.vary)
-            te_gt_y = utils.restore_meanvar(te_ground_truth[:, 0], dataset.meany, dataset.vary)
-            te_pred_d = utils.restore_meanvar(te_predicted[:, 1], dataset.meand, dataset.vard)
-            te_gt_d = utils.restore_meanvar(te_ground_truth[:, 1], dataset.meand, dataset.vard)
-        
+            tr_pred_y = utils.restore_meanvar(tr_predicted[:, 0], dataset.a_y, dataset.b_y)
+            tr_gt_y = utils.restore_meanvar(tr_ground_truth[:, 0], dataset.a_y, dataset.b_y)
+            tr_pred_d = utils.restore_meanvar(tr_predicted[:, 1], dataset.a_d, dataset.b_d)
+            tr_gt_d = utils.restore_meanvar(tr_ground_truth[:, 1], dataset.a_d, dataset.b_d)
         
         tr_pred_y_list += list(tr_pred_y.cpu().detach().numpy())
         tr_gt_y_list += list(tr_gt_y.cpu().detach().numpy())
         tr_pred_d_list += list(tr_pred_d.cpu().detach().numpy())
         tr_gt_d_list += list(tr_gt_d.cpu().detach().numpy())
         
-        val_pred_y_list += list(val_pred_y.cpu().detach().numpy())
-        val_gt_y_list += list(val_gt_y.cpu().detach().numpy())
-        val_pred_d_list += list(val_pred_d.cpu().detach().numpy())
-        val_gt_d_list += list(val_gt_d.cpu().detach().numpy())
+        val_pred_y_list += list(val_predicted[:,0].cpu().detach().numpy())
+        val_gt_y_list += list(val_ground_truth[:,0].cpu().detach().numpy())
+        val_pred_d_list += list(val_predicted[:,1].cpu().detach().numpy())
+        val_gt_d_list += list(val_ground_truth[:,1].cpu().detach().numpy())
 
-        te_pred_y_list += list(te_pred_y.cpu().detach().numpy())
-        te_gt_y_list += list(te_gt_y.cpu().detach().numpy())
-        te_pred_d_list += list(te_pred_d.cpu().detach().numpy())
-        te_gt_d_list += list(te_gt_d.cpu().detach().numpy())
+        te_pred_y_list += list(te_predicted[:,0].cpu().detach().numpy())
+        te_gt_y_list += list(te_ground_truth[:,0].cpu().detach().numpy())
+        te_pred_d_list += list(te_predicted[:,1].cpu().detach().numpy())
+        te_gt_d_list += list(te_ground_truth[:,1].cpu().detach().numpy())
 
 
     # Calculate Epoch Loss
