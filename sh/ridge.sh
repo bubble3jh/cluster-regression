@@ -11,7 +11,7 @@ do
         do
             for lamb in 0.1 0.5
             do
-            CUDA_VISIBLE_DEVICES=7 python3 main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=100 --scheduler=constant --scaling=${scaling} --lamb=${lamb}
+            CUDA_VISIBLE_DEVICES=7 python3 main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=constant --scaling=${scaling} --lamb=${lamb}
             done
         done
     done
@@ -26,7 +26,7 @@ do
         do
             for lamb in 0.1 0.5
             do
-            CUDA_VISIBLE_DEVICES=7 python3 main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=100 --scheduler=cos_anneal --t_max=10 --scaling=${scaling} --lamb=${lamb}
+            CUDA_VISIBLE_DEVICES=7 python3 main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=cos_anneal --t_max=10 --scaling=${scaling} --lamb=${lamb}
             done
         done
     done
