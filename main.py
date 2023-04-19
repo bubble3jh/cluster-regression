@@ -36,14 +36,14 @@ parser.add_argument(
     default='./data/data_final_mod.csv',
     help="path to datasets location",)
 
-parser.add_argument("--tr_ratio", type=float, default=0.7,
-          help="Ratio of train data (Default : 0.2)")
+# parser.add_argument("--tr_ratio", type=float, default=0.7,
+#           help="Ratio of train data (Default : 0.2)")
 
-parser.add_argument("--val_ratio", type=float, default=0.1,
-          help="Ratio of validation data (Default : 0.1)")
+# parser.add_argument("--val_ratio", type=float, default=0.1,
+#           help="Ratio of validation data (Default : 0.1)")
 
-parser.add_argument("--te_ratio", type=float, default=0.2,
-          help="Ratio of test data (Default : 0.2)")
+# parser.add_argument("--te_ratio", type=float, default=0.2,
+#           help="Ratio of test data (Default : 0.2)")
 
 parser.add_argument(
     "--batch_size",
@@ -150,7 +150,7 @@ print(f"Device : {args.device}")
 
 ## Set wandb ---------------------------------------------------------------------------
 if args.ignore_wandb == False:
-    wandb.init(project="cluster-medical-ai")
+    wandb.init(entity="mlai_medical_ai", project="cluster-regression")
     wandb.config.update(args)
     wandb.run.name = f"{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
 
@@ -273,20 +273,20 @@ for epoch in range(1, args.epochs + 1):
             te_gt_d = utils.restore_minmax(te_ground_truth[:, 1], dataset.mind, dataset.maxd) 
                       
         elif args.scaling == "normalization":
-            tr_pred_y = utils.restore_meanvar(tr_predicted[:, 0], dataset.miny, dataset.maxy)
-            tr_gt_y = utils.restore_meanvar(tr_ground_truth[:, 0], dataset.miny, dataset.maxy)
-            tr_pred_d = utils.restore_meanvar(tr_predicted[:, 1], dataset.mind, dataset.maxd)
-            tr_gt_d = utils.restore_meanvar(tr_ground_truth[:, 1], dataset.mind, dataset.maxd)
+            tr_pred_y = utils.restore_meanvar(tr_predicted[:, 0], dataset.meany, dataset.vary)
+            tr_gt_y = utils.restore_meanvar(tr_ground_truth[:, 0], dataset.meany, dataset.vary)
+            tr_pred_d = utils.restore_meanvar(tr_predicted[:, 1], dataset.meand, dataset.vard)
+            tr_gt_d = utils.restore_meanvar(tr_ground_truth[:, 1], dataset.meand, dataset.vard)
             
-            val_pred_y = utils.restore_meanvar(val_predicted[:, 0], dataset.miny, dataset.maxy)
-            val_gt_y = utils.restore_meanvar(val_ground_truth[:, 0], dataset.miny, dataset.maxy)
-            val_pred_d = utils.restore_meanvar(val_predicted[:, 1], dataset.mind, dataset.maxd)
-            val_gt_d = utils.restore_meanvar(val_ground_truth[:, 1], dataset.mind, dataset.maxd)
+            val_pred_y = utils.restore_meanvar(val_predicted[:, 0], dataset.meany, dataset.vary)
+            val_gt_y = utils.restore_meanvar(val_ground_truth[:, 0], dataset.meany, dataset.vary)
+            val_pred_d = utils.restore_meanvar(val_predicted[:, 1], dataset.meand, dataset.vard)
+            val_gt_d = utils.restore_meanvar(val_ground_truth[:, 1], dataset.meand, dataset.vard)
             
-            te_pred_y = utils.restore_meanvar(te_predicted[:, 0], dataset.miny, dataset.maxy)
-            te_gt_y = utils.restore_meanvar(te_ground_truth[:, 0], dataset.miny, dataset.maxy)
-            te_pred_d = utils.restore_meanvar(te_predicted[:, 1], dataset.mind, dataset.maxd)
-            te_gt_d = utils.restore_meanvar(te_ground_truth[:, 1], dataset.mind, dataset.maxd)
+            te_pred_y = utils.restore_meanvar(te_predicted[:, 0], dataset.meany, dataset.vary)
+            te_gt_y = utils.restore_meanvar(te_ground_truth[:, 0], dataset.meany, dataset.vary)
+            te_pred_d = utils.restore_meanvar(te_predicted[:, 1], dataset.meand, dataset.vard)
+            te_gt_d = utils.restore_meanvar(te_ground_truth[:, 1], dataset.meand, dataset.vard)
         
         
         tr_pred_y_list += list(tr_pred_y.cpu().detach().numpy())
