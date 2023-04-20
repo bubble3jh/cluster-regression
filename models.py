@@ -35,12 +35,13 @@ class MLPRegressor(nn.Module):
         a5_embs = self.lookup_place(cat_x[:,:,4].to(torch.int))
         a6_embs = self.lookup_add(cat_x[:,:,5].to(torch.int))
         a7_embs = self.lookup_rep(cat_x[:,:,6].to(torch.int))
-
+        # categorical datas embedding 평균
         cat_embs = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs,
                                               a6_embs, a7_embs]), axis=0)
         
         cont_x = self.cont_NN(cont_x)
         x = torch.cat((cat_embs, cont_x), dim=2)
+        # cont, category data embedding 합쳐서 datalen 길이만큼 자른다음 각각에 대해서 평균내서 크기 맞춘다음 다시 합치기
         sliced_tensors = []
         for i in range(a1_embs.shape[0]):
             m = len[i].item()

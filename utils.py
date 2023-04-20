@@ -51,6 +51,7 @@ class Tabledata(Dataset):
         cont_X = torch.from_numpy(self.cont_X[self.cluster == index])
         cont_X = delete_rows_by_ratio(cont_X, self.ratio)
         data_len = cont_X.shape[0]
+        # 0인 tensor 복제해서 구역 할당
         cont_tensor = self.cont_tensor.clone()
         cont_tensor[:cont_X.shape[0],] = cont_X
 
