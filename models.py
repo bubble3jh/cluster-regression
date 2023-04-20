@@ -10,14 +10,45 @@ class MLPRegressor(nn.Module):
     '''
     embedding 태워서 input으로 넣도록 수정 필요
     '''
-    def __init__(self, input_size=24, hidden_size=64, output_size=2, drop_out=0.0):
+    def __init__(self, input_size=128, hidden_size=64, output_size=2, drop_out=0.0):
         super().__init__()
+        self.cont_NN = nn.Sequential(nn.Linear(5, 64),
+                                     nn.ReLU())
+        emb_hidden_dim = hidden_size
+        self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+        self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+        self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+        self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cuda:0')
+        self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cuda:0')
+        self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cuda:0')
+        self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
         self.fc1 = nn.Linear(input_size, hidden_size, bias=True)
         self.fc2 = nn.Linear(hidden_size, output_size, bias=True)
         # self.fc3 = nn.Linear(hidden_size, output_size, bias=True)
         self.drop_out = nn.Dropout(drop_out)
 
-    def forward(self, x):
+    def forward(self, cont_x, cat_x, len):
+        a1_embs = self.lookup_gender(cat_x[:,:,0].to(torch.int))
+        a2_embs = self.lookup_korean(cat_x[:,:,1].to(torch.int))
+        a3_embs = self.lookup_primary(cat_x[:,:,2].to(torch.int))
+        a4_embs = self.lookup_job(cat_x[:,:,3].to(torch.int))
+        a5_embs = self.lookup_place(cat_x[:,:,4].to(torch.int))
+        a6_embs = self.lookup_add(cat_x[:,:,5].to(torch.int))
+        a7_embs = self.lookup_rep(cat_x[:,:,6].to(torch.int))
+
+        cat_embs = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs,
+                                              a6_embs, a7_embs]), axis=0)
+        
+        cont_x = self.cont_NN(cont_x)
+        x = torch.cat((cat_embs, cont_x), dim=2)
+        sliced_tensors = []
+        for i in range(a1_embs.shape[0]):
+            m = len[i].item()
+            sliced_tensor = x[i, :m, :]  
+            sliced_tensor = torch.mean(sliced_tensor, dim=0)
+            sliced_tensors.append(sliced_tensor)
+        x = torch.stack(sliced_tensors, dim=0)
+        
         x = F.relu(self.fc1(x))
         x = self.drop_out(F.relu(self.fc2(x)))
         # x = F.relu(self.fc3(x))

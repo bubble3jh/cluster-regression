@@ -63,9 +63,9 @@ parser.add_argument(
 # Model ---------------------------------------------------------
 parser.add_argument(
     "--model",
-    type=str, default='transformer',
+    type=str, default='mlp',
     choices=["transformer", "linear", "ridge", "mlp", "svr"],
-    help="model name (default : transformer)")
+    help="model name (default : mlp)")
 
 parser.add_argument("--save_path",
             type=str, default="/mlainas/medical-ai/cluster-regression/exp_result/",
@@ -73,8 +73,8 @@ parser.add_argument("--save_path",
 
 parser.add_argument(
     "--num_features",
-    type=int, default=24,
-    help="feature size (default : 24)"
+    type=int, default=128,
+    help="feature size (default : 128)"
 )
 
 parser.add_argument(
@@ -95,7 +95,12 @@ parser.add_argument(
     help="Dropout Rate (Default : 0)"
 )
 
-parser.add_argument("--emb", action='store_false',  help="MLP embedding (Default : True)")
+parser.add_argument(
+    "--mask_ratio",
+    type=float, default=0.5,
+    help="Cluster Mask Ratio (Default : 0.5)"
+)
+
 #----------------------------------------------------------------
 
 # Criterion -----------------------------------------------------
@@ -158,10 +163,8 @@ if args.ignore_wandb == False:
 
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
-if args.model != "transformer":
-    dataset = utils.Tabledata(data, args.scaling, args.emb)
-else:
-    dataset = utils.Seqdata(data)
+dataset = utils.Tabledata(data, args.scaling, args.mask_ratio)
+# dataset = utils.Seqdata(data)
 dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 print("Successfully load data!")
 #-------------------------------------------------------------------------------------
@@ -173,8 +176,6 @@ if args.model == 'transformer':
                     output_size=args.output_size).to(args.device)
    
 elif args.model == "mlp":
-    if not args.emb:
-        args.num_features = 12
     model = models.MLPRegressor(input_size=args.num_features,
                     hidden_size=args.hidden_dim,
                     output_size=args.output_size,
@@ -277,7 +278,7 @@ for epoch in range(1, args.epochs + 1):
             tr_gt_y = utils.restore_meanvar(tr_ground_truth[:, 0], dataset.a_y, dataset.b_y)
             tr_pred_d = utils.restore_meanvar(tr_predicted[:, 1], dataset.a_d, dataset.b_d)
             tr_gt_d = utils.restore_meanvar(tr_ground_truth[:, 1], dataset.a_d, dataset.b_d)
-        
+
         tr_pred_y_list += list(tr_pred_y.cpu().detach().numpy())
         tr_gt_y_list += list(tr_gt_y.cpu().detach().numpy())
         tr_pred_d_list += list(tr_pred_d.cpu().detach().numpy())
@@ -292,7 +293,6 @@ for epoch in range(1, args.epochs + 1):
         te_gt_y_list += list(te_ground_truth[:,0].cpu().detach().numpy())
         te_pred_d_list += list(te_predicted[:,1].cpu().detach().numpy())
         te_gt_d_list += list(te_ground_truth[:,1].cpu().detach().numpy())
-
 
     # Calculate Epoch Loss
     tr_loss = tr_epoch_loss / total_tr_num_data

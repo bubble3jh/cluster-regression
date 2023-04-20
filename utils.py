@@ -8,14 +8,19 @@ import pandas as pd
 
 import pickle
 import random
-
+import math
 from torch.utils.data import Dataset
 
 
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
-    def __init__(self, data, scale='minmax', emb=True):
-        self.emb = emb
+    def __init__(self, data, scale='minmax', ratio=0.5):
+        self.ratio = ratio
+        self.cont_tensor = torch.zeros([124,5])
+        self.cat_tensor = torch.zeros([124,7])
+        data=data[['cluster', 'age', 'CT_R', 'CT_E', 'dis', 'danger','gender', 'is_korean', 'primary case', 'job_idx', 'place_idx', 'add_idx','rep_idx', 'diff_days','y']]
+
+        data['cluster'] = data['cluster'].map({value: idx for idx, value in enumerate(sorted(data['cluster'].unique()))})
         for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
             # minmax_col(data, c)
             meanvar_col(data, c)
@@ -29,33 +34,33 @@ class Tabledata(Dataset):
         elif scale =='normalization':
             self.a_y, self.b_y = meanvar_col(data, "y")
             self.a_d, self.b_d = meanvar_col(data, "d")
-        self.binary_X = data.iloc[:, 1:4].values.astype('float32')
-        self.cont_X = data.iloc[:, 4:9].values.astype('float32') # diff_days 는 사용 x
-        self.cat_X = data.iloc[:, 10:14].astype('category')
+        self.cluster = data.iloc[:,0].values.astype('float32')
+        self.cont_X = data.iloc[:, 1:6].values.astype('float32')
+        self.cat_X = data.iloc[:, 6:13].astype('category')
         self.y = data.iloc[:, -2:].values.astype('float32')
         # 범주형 데이터 처리 - 0~n 까지로 맞춰줌
         self.cat_cols = self.cat_X.columns
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
         self.cat_X = self.cat_X.apply(lambda x: x.cat.codes)
         self.cat_X = torch.from_numpy(self.cat_X.to_numpy()).long()
-        self.embeddings = nn.ModuleList([nn.Embedding(len(self.cat_map[col]), 4) for col in self.cat_cols])
 
     def __len__(self):
-        return len(self.cont_X)
+        return len(np.unique(self.cluster))
 
     def __getitem__(self, index):
-        cont_X = torch.from_numpy(self.cont_X[index])
-        cat_X = self.cat_X[index]
-        if self.emb :
-            # batch size 가 1일 때 예외 처리
-            if len(cat_X.shape) == 1:
-                embeddings = [embedding(cat_X[i].unsqueeze(0)) for i, embedding in enumerate(self.embeddings)]
-            else:
-                embeddings = [embedding(cat_X[:, i]) for i, embedding in enumerate(self.embeddings)]
-            cat_X = torch.cat(embeddings, 1).squeeze()
-        binary_X = torch.from_numpy(self.binary_X[index])
-        y = torch.tensor(self.y[index])
-        return binary_X, cont_X, cat_X, y
+        cont_X = torch.from_numpy(self.cont_X[self.cluster == index])
+        cont_X = delete_rows_by_ratio(cont_X, self.ratio)
+        data_len = cont_X.shape[0]
+        cont_tensor = self.cont_tensor.clone()
+        cont_tensor[:cont_X.shape[0],] = cont_X
+
+        cat_X = self.cat_X[self.cluster == index]
+        cat_X = delete_rows_by_ratio(cat_X, self.ratio)
+        cat_tensor = self.cat_tensor.clone()
+        cat_tensor[:cat_X.shape[0],] = cat_X
+        
+        y = torch.tensor(self.y[self.cluster == index])
+        return cont_tensor, cat_tensor, data_len, y[0]
 
 class Seqdata(Dataset):
     def __init__(self, data):
@@ -104,6 +109,13 @@ class Seqdata(Dataset):
         y = torch.tensor(self.y[index])
         return cont_P, disc_P, cont_C, disc_C, y
 
+def delete_rows_by_ratio(tensor, ratio):
+    tensor_size = tensor.size()
+    
+    num_rows_to_delete = math.ceil(tensor_size[0] * ratio)
+    tensor = tensor[:tensor_size[0] - num_rows_to_delete]
+    
+    return tensor
 
 ## MinMax Scaling Functions ------------------------------------
 def minmax_col(data, name):
@@ -147,49 +159,25 @@ class RMSELoss(nn.Module):
 ## Train --------------------------------------------------------------------------------------
 def train(data, model, optimizer, criterion, lamb=0.0):
     model.train()
-    if model.__class__.__name__ != "TSTransformer" :
-        binary_X, cont_X, cat_X, y = data
-        data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
-        y=y.cuda()
-        optimizer.zero_grad()
-        batch_num = cont_X.shape[0]
-        out = model(data_x)
-        
-        loss_d = criterion(out[:,0], y[:,0])
-        loss_y = criterion(out[:,1], y[:,1])
-        loss = loss_d + loss_y
-        
-        # Add Penalty term for ridge regression
-        if lamb != 0.0:
-            loss += lamb * torch.norm(model.linear1.weight, p=2)
-        
-        if not torch.isnan(loss):
-            loss.backward()
-            optimizer.step()
-            return loss.item(), batch_num, out, y
-        else:
-            return 0, batch_num, out, y
-    else :
-        cont_P, disc_P, cont_C, disc_C, y = data
-        cont_P, disc_P, cont_C, disc_C, y = cont_P.to("cuda"), disc_P.to("cuda"), cont_C.to("cuda"), disc_C.to("cuda"), y.to("cuda")
-        optimizer.zero_grad()
-        batch_num = cont_P.shape[0]
-        out = model(cont_P, disc_P, cont_C, disc_C)
-        
-        # loss1 = criterion(out[:,0], y[:,0])
-        # loss2 = criterion(out[:,1], y[:,1])
-        # loss = loss1 + loss2
-        
-        # # Add Penalty term for ridge regression
-        # if lamb != 0.0:
-        #     loss += lamb * torch.norm(model.linear1.weight, p=2)
-        
-        if not torch.isnan(loss):
-        #     loss.backward()
-        #     optimizer.step()
-            return loss.item(), batch_num, out, y
-        else:
-            return 0, batch_num, out, y
+    cont_X, cat_X, len, y = data
+    cont_X, cat_X, len, y= cont_X.cuda(), cat_X.cuda(), len.cuda(), y.cuda()
+    optimizer.zero_grad()
+    batch_num = cont_X.shape[0]
+    out = model(cont_X, cat_X, len)
+    loss_d = criterion(out[:,0], y[:,0])
+    loss_y = criterion(out[:,1], y[:,1])
+    loss = loss_d + loss_y
+    
+    # Add Penalty term for ridge regression
+    if lamb != 0.0:
+        loss += lamb * torch.norm(model.linear1.weight, p=2)
+    
+    if not torch.isnan(loss):
+        loss.backward()
+        optimizer.step()
+        return loss.item(), batch_num, out, y
+    else:
+        return 0, batch_num, out, y
 
 ## Validation --------------------------------------------------------------------------------
 @torch.no_grad()
@@ -201,12 +189,11 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
     b_d : max_d or var_d
     '''
     model.eval()
-    binary_X, cont_X, cat_X, y = data
-    data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
-    y=y.cuda()
+    cont_X, cat_X, len, y = data
+    cont_X, cat_X, len, y= cont_X.cuda(), cat_X.cuda(), len.cuda(), y.cuda()
 
-    batch_num = data_x.shape[0]
-    out = model(data_x)
+    batch_num = cont_X.shape[0]
+    out = model(cont_X, cat_X, len)
     
     if scaling=="minmax":
         pred_y = restore_minmax(out[:, 0], a_y, b_y)
@@ -234,12 +221,11 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
 @torch.no_grad()
 def test(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):    
     model.eval()
-    binary_X, cont_X, cat_X, y = data
-    data_x = torch.cat((binary_X, cont_X, cat_X), dim=1).cuda()
-    y=y.cuda()
+    cont_X, cat_X, len, y = data
+    cont_X, cat_X, len, y= cont_X.cuda(), cat_X.cuda(), len.cuda(), y.cuda()
 
-    batch_num = data_x.shape[0]
-    out = model(data_x)
+    batch_num = cont_X.shape[0]
+    out = model(cont_X, cat_X, len)
     
     if scaling=="minmax":
         pred_y = restore_minmax(out[:, 0], a_y, b_y)
