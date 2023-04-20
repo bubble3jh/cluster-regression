@@ -47,11 +47,11 @@ class Tabledata(Dataset):
 
     def __getitem__(self, index):
         cont_X = torch.from_numpy(self.cont_X[self.cluster == index])
-        cont_X = delete_rows_by_ratio(cont_X, self.ratio)
-        data_len = cont_X.shape[0]
+        cont_X_del = delete_rows_by_ratio(cont_X, self.ratio)
+        data_len = cont_X_del.shape[0]
         # 0인 tensor 복제해서 구역 할당
         cont_tensor = self.cont_tensor.clone()
-        cont_tensor[:cont_X.shape[0],] = cont_X
+        cont_tensor[:cont_X_del.shape[0],] = cont_X_del
 
         cat_X = self.cat_X[self.cluster == index]
         cat_X = delete_rows_by_ratio(cat_X, self.ratio)
@@ -112,6 +112,7 @@ def delete_rows_by_ratio(tensor, ratio):
     tensor_size = tensor.size()
     
     num_rows_to_delete = math.ceil(tensor_size[0] * ratio)
+    num_rows_to_delete = min(num_rows_to_delete, tensor_size[0] - 1) # 길이가 1보다 작아지지 않도록 함
     tensor = tensor[:tensor_size[0] - num_rows_to_delete]
     
     return tensor

@@ -257,7 +257,6 @@ for epoch in range(1, args.epochs + 1):
         te_batch_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model, eval_criterion,
                                                                             args.scaling, dataset.a_y, dataset.b_y,
                                                                             dataset.a_d, dataset.b_d)
-
         tr_epoch_loss += tr_batch_loss
         val_epoch_loss += val_batch_loss
         te_epoch_loss += te_batch_loss
@@ -293,7 +292,7 @@ for epoch in range(1, args.epochs + 1):
         te_gt_y_list += list(te_ground_truth[:,0].cpu().detach().numpy())
         te_pred_d_list += list(te_predicted[:,1].cpu().detach().numpy())
         te_gt_d_list += list(te_ground_truth[:,1].cpu().detach().numpy())
-
+        
     # Calculate Epoch Loss
     tr_loss = tr_epoch_loss / total_tr_num_data
     val_loss = val_epoch_loss / total_val_num_data
