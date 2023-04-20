@@ -24,10 +24,8 @@ class Tabledata(Dataset):
         for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
             # minmax_col(data, c)
             meanvar_col(data, c)
-        for i in data['cluster'].unique():
-            max_diff_days = data[data['cluster'] == i]['diff_days'].max()
-            data.loc[data['cluster'] == i, 'd'] = max_diff_days
-        
+        grouped = data.groupby('cluster')['diff_days'].agg(['max', 'min'])
+        data['d'] = data['cluster'].map(lambda x: (grouped.loc[x, 'max'] - grouped.loc[x, 'min']) + 1)
         if scale == 'minmax':
             self.a_y, self.b_y = minmax_col(data,"y")
             self.a_d, self.b_d = minmax_col(data,"d")
