@@ -1,33 +1,25 @@
-## Best
 
-
-### Coarse Search
-# Constant
-for lr_init in 1e-2 1e-3 1e-4 1e-5
+## Coarse Search
+## Constant
+for lr_init in 1e-2 1e-3 1e-4
 do
-    for wd in 1e-3 1e-4 1e-5
-    do
-        for scaling in 'minmax' 'normalization'
-        do
-            for lamb in 0.1 0.5
-            do
-            CUDA_VISIBLE_DEVICES=7 python3 main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=constant --scaling=${scaling} --lamb=${lamb}
-            done
-        done
-    done
+for wd in 1e-3 1e-4 1e-5
+do
+for lamb in 0.1 1 10
+do
+CUDA_VISIBLE_DEVICES=1 "/mlainas/teang1995/anaconda3/envs/cluster/bin/python3" main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=constant --lamb=${lamb}
+done
+done
 done
 
-# Cos Anneal
-for lr_init in 1e-2 1e-3 1e-4 1e-5
+## Cos Anneal
+for lr_init in 1e-2 1e-3 1e-4
 do
-    for wd in 1e-3 1e-4 1e-5
-    do
-        for scaling in 'minmax' 'normalization'
-        do
-            for lamb in 0.1 0.5
-            do
-            CUDA_VISIBLE_DEVICES=7 python3 main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=cos_anneal --t_max=10 --scaling=${scaling} --lamb=${lamb}
-            done
-        done
-    done
+for wd in 1e-3 1e-4 1e-5
+do
+for lamb in 0.1 1 10
+do
+CUDA_VISIBLE_DEVICES=1 "/mlainas/teang1995/anaconda3/envs/cluster/bin/python3 main.py" --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=cos_anneal --t_max=200  --lamb=${lamb}
+done
+done
 done

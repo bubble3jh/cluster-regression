@@ -114,7 +114,7 @@ parser.add_argument(
 
 parser.add_argument(
     "--eval_criterion",
-    type=str, default='MAE', choices=["MAE"],
+    type=str, default='MAE', choices=["MAE", "RMSE"],
     help="Criterion for training (default : MAE)")
 #----------------------------------------------------------------
 
@@ -208,12 +208,14 @@ elif args.criterion == "RMSE":
     criterion = utils.RMSELoss()
 
 
-# Validation / Test Criterion
+# Validation Criterion
 if args.eval_criterion == 'MAE':
     eval_criterion = nn.L1Loss()
 
 elif args.eval_criterion == "RMSE":
     eval_criterion = utils.RMSELoss()
+    
+
 # ---------------------------------------------------------------------------------------------
 
 ## Optimizer and Scheduler --------------------------------------------------------------------
@@ -232,11 +234,8 @@ else:
 
 
 ## Training Phase -----------------------------------------------------------------------------
-columns = ["ep", "lr",
-           f"tr_loss({args.criterion})",
-           f"val_loss({args.eval_criterion})",
-           f"te_loss({args.eval_criterion})",
-           "time"]
+columns = ["ep", "lr", f"tr_loss({args.criterion})", f"val_loss({args.eval_criterion})",
+           "te_loss(MAE)", "te_loss(RMSE)", "time"]
 
 best_val_loss = 9999
 
@@ -244,7 +243,7 @@ for epoch in range(1, args.epochs + 1):
     time_ep = time.time()
     lr = optimizer.param_groups[0]['lr']
 
-    tr_epoch_loss = 0; val_epoch_loss = 0; te_epoch_loss = 0
+    tr_epoch_loss = 0; val_epoch_loss = 0; te_mae_epoch_loss = 0; te_rmse_epoch_loss = 0
 
     total_tr_num_data = 0; total_val_num_data = 0; total_te_num_data = 0
 
@@ -259,12 +258,13 @@ for epoch in range(1, args.epochs + 1):
         val_batch_loss, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
                                                                             args.scaling, dataset.a_y, dataset.b_y,
                                                                             dataset.a_d, dataset.b_d)
-        te_batch_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model, eval_criterion,
+        te_mae_batch_loss, te_rmse_batch_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model,
                                                                             args.scaling, dataset.a_y, dataset.b_y,
                                                                             dataset.a_d, dataset.b_d)
         tr_epoch_loss += tr_batch_loss
         val_epoch_loss += val_batch_loss
-        te_epoch_loss += te_batch_loss
+        te_mae_epoch_loss += te_mae_batch_loss
+        te_rmse_epoch_loss += te_rmse_batch_loss
 
         total_tr_num_data += tr_num_data
         total_val_num_data += val_num_data
@@ -301,11 +301,12 @@ for epoch in range(1, args.epochs + 1):
     # Calculate Epoch Loss
     tr_loss = tr_epoch_loss / total_tr_num_data
     val_loss = val_epoch_loss / total_val_num_data
-    te_loss = te_epoch_loss / total_te_num_data
+    te_mae_loss = te_mae_epoch_loss / total_te_num_data
+    te_rmse_loss = te_rmse_epoch_loss / total_te_num_data
     
     time_ep = time.time() - time_ep
 
-    values = [epoch, lr, tr_loss, val_loss, te_loss, time_ep,]
+    values = [epoch, lr, tr_loss, val_loss, te_mae_loss, te_rmse_loss, time_ep,]
 
     table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
     if epoch % 20 == 0 or epoch == 1:
@@ -322,7 +323,8 @@ for epoch in range(1, args.epochs + 1):
     if val_loss < best_val_loss:
         best_epoch = epoch
         best_val_loss = val_loss
-        best_te_loss = te_loss
+        best_te_mae_loss = te_mae_loss
+        best_te_rmse_loss = te_rmse_loss
         
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
@@ -350,20 +352,22 @@ for epoch in range(1, args.epochs + 1):
         wandb.log({"lr" : lr,
                 "tr_loss" : tr_loss,
                 "val_loss": val_loss,
-                "te_loss" : te_loss,
+                "te_mae_loss" : te_mae_loss,
+                "te_rmse_loss" : te_rmse_loss,
                 })
 # ---------------------------------------------------------------------------------------------
 
 
 
 ## Print Best Model ---------------------------------------------------------------------------
-print(f"Best {args.model} achieved {best_te_loss} on {best_epoch} epoch!!")
+print(f"Best {args.model} achieved {best_te_mae_loss} on {best_epoch} epoch!!")
 print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt'!!")
 
 if args.ignore_wandb == False:
     wandb.run.summary["best_epoch"]  = best_epoch
     wandb.run.summary["best_val_loss"] = best_val_loss
-    wandb.run.summary["best_te_loss"] = best_te_loss
+    wandb.run.summary["best_te_mae_loss"] = best_te_mae_loss
+    wandb.run.summary["best_te_rmse_loss"] = best_te_rmse_loss
     wandb.run.summary["tr_dat_num"] = total_tr_num_data
     wandb.run.summary["val_dat_num"] : total_val_num_data
     wandb.run.summary["te_dat_num"] : total_te_num_data

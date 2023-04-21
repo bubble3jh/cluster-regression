@@ -218,7 +218,11 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
 
 ## Test ----------------------------------------------------------------------------------------
 @torch.no_grad()
-def test(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):    
+def test(data, model, scaling, a_y, b_y, a_d, b_d):
+    
+    criterion_mae = nn.L1Loss()
+    criterion_rmse = RMSELoss()
+    
     model.eval()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
     out = model(cont_p, cont_c, cat_p, cat_c, len)
@@ -234,12 +238,21 @@ def test(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
         pred_d = restore_meanvar(out[:, 1], a_d, b_d)
         gt_y = restore_meanvar(y[:,0], a_y, b_y)
         gt_d = restore_meanvar(y[:,1], a_d, b_d)
-        
-    loss_y = eval_criterion(pred_y, gt_y)
-    loss_d = eval_criterion(pred_d, gt_d)
-    loss = loss_y + loss_d
-    if not torch.isnan(loss):
-        return loss.item(), batch_num, out, y
+    
+    
+    # MAE
+    mae_y = criterion_mae(pred_y, gt_y)
+    mae_d = criterion_mae(pred_d, gt_d)
+    mae = mae_y + mae_d
+    
+    # RMSE
+    rmse_y = criterion_rmse(pred_y, gt_y)
+    rmse_d = criterion_rmse(pred_d, gt_d)
+    rmse = rmse_y + rmse_d
+    
+    
+    if not torch.isnan(mae) and not torch.isnan(rmse):
+        return mae.item(), rmse.item(), batch_num, out, y
     else:
         return 0, batch_num, out, y
 
