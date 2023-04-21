@@ -12,36 +12,40 @@ class MLPRegressor(nn.Module):
     '''
     def __init__(self, input_size=128, hidden_size=64, output_size=2, drop_out=0.0):
         super().__init__()
-        self.cont_NN = nn.Sequential(nn.Linear(5, 64),
-                                     nn.ReLU())
-        emb_hidden_dim = hidden_size
+        self.cont_p_NN = nn.Sequential(nn.Linear(3, 32),
+                                     nn.ReLU(),
+                                     nn.Linear(32, 32))
+        self.cont_c_NN = nn.Sequential(nn.Linear(2, 32),
+                                     nn.ReLU(),
+                                     nn.Linear(32, 32))
+        emb_hidden_dim = hidden_size//2
         self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
         self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
         self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
         self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cuda:0')
+        self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
         self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cuda:0')
         self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cuda:0')
-        self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
         self.fc1 = nn.Linear(input_size, hidden_size, bias=True)
         self.fc2 = nn.Linear(hidden_size, output_size, bias=True)
         # self.fc3 = nn.Linear(hidden_size, output_size, bias=True)
         self.drop_out = nn.Dropout(drop_out)
 
-    def forward(self, cont_x, cat_x, len):
-        a1_embs = self.lookup_gender(cat_x[:,:,0].to(torch.int))
-        a2_embs = self.lookup_korean(cat_x[:,:,1].to(torch.int))
-        a3_embs = self.lookup_primary(cat_x[:,:,2].to(torch.int))
-        a4_embs = self.lookup_job(cat_x[:,:,3].to(torch.int))
-        a5_embs = self.lookup_place(cat_x[:,:,4].to(torch.int))
-        a6_embs = self.lookup_add(cat_x[:,:,5].to(torch.int))
-        a7_embs = self.lookup_rep(cat_x[:,:,6].to(torch.int))
+    def forward(self, cont_p, cont_c, cat_p, cat_c, len):
+        a1_embs = self.lookup_gender(cat_p[:,:,0].to(torch.int))
+        a2_embs = self.lookup_korean(cat_p[:,:,1].to(torch.int))
+        a3_embs = self.lookup_primary(cat_p[:,:,2].to(torch.int))
+        a4_embs = self.lookup_job(cat_p[:,:,3].to(torch.int))
+        a7_embs = self.lookup_rep(cat_p[:,:,4].to(torch.int))
+        a5_embs = self.lookup_place(cat_c[:,:,0].to(torch.int))
+        a6_embs = self.lookup_add(cat_c[:,:,1].to(torch.int))
         # categorical datas embedding 평균
-        cat_embs = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs,
-                                              a6_embs, a7_embs]), axis=0)
+        cat_p_embs = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
+        cat_c_embs = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
         
-        cont_x = self.cont_NN(cont_x)
-        x = torch.cat((cat_embs, cont_x), dim=2)
-        # cont, category data embedding 합쳐서 datalen 길이만큼 자른다음 각각에 대해서 평균내서 크기 맞춘다음 다시 합치기
+        cont_p = self.cont_p_NN(cont_p)
+        cont_c = self.cont_c_NN(cont_c)
+        x = torch.cat((cat_p_embs, cat_c_embs, cont_p, cont_c), dim=2)
         sliced_tensors = []
         for i in range(a1_embs.shape[0]):
             m = len[i].item()

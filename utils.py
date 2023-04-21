@@ -18,7 +18,8 @@ class Tabledata(Dataset):
         self.ratio = ratio
         self.cont_tensor = torch.zeros([124,5])
         self.cat_tensor = torch.zeros([124,7])
-        data=data[['cluster', 'age', 'CT_R', 'CT_E', 'dis', 'danger','gender', 'is_korean', 'primary case', 'job_idx', 'place_idx', 'add_idx','rep_idx', 'diff_days','y']]
+        data=data[['cluster', 'age', 'CT_R', 'CT_E', 'dis', 'danger','gender', 'is_korean', 'primary case', 
+                   'job_idx', 'rep_idx', 'place_idx', 'add_idx', 'diff_days','y']]
 
         data['cluster'] = data['cluster'].map({value: idx for idx, value in enumerate(sorted(data['cluster'].unique()))})
         for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
@@ -57,9 +58,12 @@ class Tabledata(Dataset):
         cat_X = delete_rows_by_ratio(cat_X, self.ratio)
         cat_tensor = self.cat_tensor.clone()
         cat_tensor[:cat_X.shape[0],] = cat_X
-        
+        cat_tensor_p = cat_tensor[:, :5]
+        cat_tensor_c = cat_tensor[:, 5:]
+        cont_tensor_p = cont_tensor[:, :3]
+        cont_tensor_c = cont_tensor[:, 3:]
         y = torch.tensor(self.y[self.cluster == index])
-        return cont_tensor, cat_tensor, data_len, y[0]
+        return cont_tensor_p,cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y[0]
 
 class Seqdata(Dataset):
     def __init__(self, data):
@@ -159,11 +163,9 @@ class RMSELoss(nn.Module):
 ## Train --------------------------------------------------------------------------------------
 def train(data, model, optimizer, criterion, lamb=0.0):
     model.train()
-    cont_X, cat_X, len, y = data
-    cont_X, cat_X, len, y= cont_X.cuda(), cat_X.cuda(), len.cuda(), y.cuda()
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
     optimizer.zero_grad()
-    batch_num = cont_X.shape[0]
-    out = model(cont_X, cat_X, len)
+    out = model(cont_p, cont_c, cat_p, cat_c, len)
     loss_d = criterion(out[:,0], y[:,0])
     loss_y = criterion(out[:,1], y[:,1])
     loss = loss_d + loss_y
@@ -189,11 +191,8 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
     b_d : max_d or var_d
     '''
     model.eval()
-    cont_X, cat_X, len, y = data
-    cont_X, cat_X, len, y= cont_X.cuda(), cat_X.cuda(), len.cuda(), y.cuda()
-
-    batch_num = cont_X.shape[0]
-    out = model(cont_X, cat_X, len)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
+    out = model(cont_p, cont_c, cat_p, cat_c, len)
     
     if scaling=="minmax":
         pred_y = restore_minmax(out[:, 0], a_y, b_y)
@@ -221,11 +220,8 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
 @torch.no_grad()
 def test(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):    
     model.eval()
-    cont_X, cat_X, len, y = data
-    cont_X, cat_X, len, y= cont_X.cuda(), cat_X.cuda(), len.cuda(), y.cuda()
-
-    batch_num = cont_X.shape[0]
-    out = model(cont_X, cat_X, len)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
+    out = model(cont_p, cont_c, cat_p, cat_c, len)
     
     if scaling=="minmax":
         pred_y = restore_minmax(out[:, 0], a_y, b_y)
@@ -247,7 +243,9 @@ def test(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
     else:
         return 0, batch_num, out, y
 
-
+def data_load(data):
+    cont_p,cont_c, cat_p, cat_c, len, y = data
+    return cont_p.shape[0], cont_p.cuda(), cont_c.cuda(), cat_p.cuda(), cat_c.cuda(), len.cuda(), y.cuda()
 
 
 def set_seed(random_seed=1000):
