@@ -10,65 +10,81 @@ class MLPRegressor(nn.Module):
     '''
     embedding 태워서 input으로 넣도록 수정 필요
     '''
-    def __init__(self, input_size=128, hidden_size=64, output_size=2, drop_out=0.0):
+    def __init__(self, input_size=128, hidden_size=64, output_size=2, drop_out=0.0, apply_embedding=True):
         super().__init__()
-        self.cont_p_NN = nn.Sequential(nn.Linear(3, 32),
-                                     nn.ReLU(),
-                                     nn.Linear(32, 32))
-        self.cont_c_NN = nn.Sequential(nn.Linear(2, 32),
-                                     nn.ReLU(),
-                                     nn.Linear(32, 32))
-        emb_hidden_dim = hidden_size//2
-        self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cuda:0')
-        self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
-        self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cuda:0')
-        self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cuda:0')
+        if not apply_embedding:
+            input_size = 12
+        self.embedding = TableEmbedding(128, apply_embedding = apply_embedding)
         self.fc1 = nn.Linear(input_size, hidden_size, bias=True)
         self.fc2 = nn.Linear(hidden_size, output_size, bias=True)
         # self.fc3 = nn.Linear(hidden_size, output_size, bias=True)
         self.drop_out = nn.Dropout(drop_out)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):
-        a1_embs = self.lookup_gender(cat_p[:,:,0].to(torch.int))
-        a2_embs = self.lookup_korean(cat_p[:,:,1].to(torch.int))
-        a3_embs = self.lookup_primary(cat_p[:,:,2].to(torch.int))
-        a4_embs = self.lookup_job(cat_p[:,:,3].to(torch.int))
-        a7_embs = self.lookup_rep(cat_p[:,:,4].to(torch.int))
-        a5_embs = self.lookup_place(cat_c[:,:,0].to(torch.int))
-        a6_embs = self.lookup_add(cat_c[:,:,1].to(torch.int))
-        # categorical datas embedding 평균
-        cat_p_embs = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
-        cat_c_embs = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
-        
-        cont_p = self.cont_p_NN(cont_p)
-        cont_c = self.cont_c_NN(cont_c)
-        x = torch.cat((cat_p_embs, cat_c_embs, cont_p, cont_c), dim=2)
-        sliced_tensors = []
-        for i in range(a1_embs.shape[0]):
-            m = len[i].item()
-            sliced_tensor = x[i, :m, :]  
-            sliced_tensor = torch.mean(sliced_tensor, dim=0)
-            sliced_tensors.append(sliced_tensor)
-        x = torch.stack(sliced_tensors, dim=0)
-        
+        x = self.embedding(cont_p, cont_c, cat_p, cat_c, len)
         x = F.relu(self.fc1(x))
         x = self.drop_out(F.relu(self.fc2(x)))
         # x = F.relu(self.fc3(x))
         return x
 
-
 class LinearRegression(torch.nn.Module):
-    def __init__(self, input_size=24, out_channels=2):
+    def __init__(self, input_size=128, out_channels=2, apply_embedding=True):
         super().__init__()
+        if not apply_embedding:
+            input_size = 12
+        self.embedding = TableEmbedding(128, apply_embedding = apply_embedding)
         self.linear1 = torch.nn.Linear(input_size, out_channels)
 
-    def forward(self, x):
+    def forward(self, cont_p, cont_c, cat_p, cat_c, len):
+        x = self.embedding(cont_p, cont_c, cat_p, cat_c, len)
         x = self.linear1(x)
         return x
 
+class TableEmbedding(torch.nn.Module):
+    def __init__(self, output_size=128, apply_embedding=True):
+        super().__init__()
+        self.apply_embedding = apply_embedding
+        if apply_embedding:
+            print("Embedding applied to data")
+            emb_hidden_dim = output_size//4
+            self.cont_p_NN = nn.Sequential(nn.Linear(3, emb_hidden_dim),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_hidden_dim, emb_hidden_dim))
+            self.cont_c_NN = nn.Sequential(nn.Linear(2, emb_hidden_dim),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_hidden_dim, emb_hidden_dim))
+            self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+            self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+            self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+            self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cuda:0')
+            self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
+            self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cuda:0')
+            self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cuda:0')
+
+    def forward(self, cont_p, cont_c, cat_p, cat_c, len):
+        if self.apply_embedding:
+            a1_embs = self.lookup_gender(cat_p[:,:,0].to(torch.int))
+            a2_embs = self.lookup_korean(cat_p[:,:,1].to(torch.int))
+            a3_embs = self.lookup_primary(cat_p[:,:,2].to(torch.int))
+            a4_embs = self.lookup_job(cat_p[:,:,3].to(torch.int))
+            a7_embs = self.lookup_rep(cat_p[:,:,4].to(torch.int))
+            a5_embs = self.lookup_place(cat_c[:,:,0].to(torch.int))
+            a6_embs = self.lookup_add(cat_c[:,:,1].to(torch.int))
+            # categorical datas embedding 평균
+            cat_p = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
+            cat_c = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
+            
+            cont_p = self.cont_p_NN(cont_p)
+            cont_c = self.cont_c_NN(cont_c)
+        x = torch.cat((cat_p, cat_c, cont_p, cont_c), dim=2)
+        sliced_tensors = []
+        for i in range(x.shape[0]):
+            m = len[i].item()
+            sliced_tensor = x[i, :m, :]  
+            sliced_tensor = torch.mean(sliced_tensor, dim=0)
+            sliced_tensors.append(sliced_tensor)
+        x = torch.stack(sliced_tensors, dim=0)
+        return x
 
 class TSTransformer(torch.nn.Module):
     def __init__(self, hidden_size=16, output_size=16):

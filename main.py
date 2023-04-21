@@ -101,6 +101,9 @@ parser.add_argument(
     help="Cluster Mask Ratio (Default : 0.5)"
 )
 
+parser.add_argument("--apply_embedding", action='store_false',
+        help = "Apply embedding to raw data (Default : True)")
+
 #----------------------------------------------------------------
 
 # Criterion -----------------------------------------------------
@@ -179,11 +182,13 @@ elif args.model == "mlp":
     model = models.MLPRegressor(input_size=args.num_features,
                     hidden_size=args.hidden_dim,
                     output_size=args.output_size,
-                    drop_out=args.drop_out).to(args.device)
+                    drop_out=args.drop_out,
+                    apply_embedding=args.apply_embedding).to(args.device)
 
 elif args.model in ["linear", "ridge"]:
     model = models.LinearRegression(input_size=args.num_features,
-                    out_channels=args.output_size).to(args.device)
+                    out_channels=args.output_size,
+                    apply_embedding=args.apply_embedding).to(args.device)
 
 elif args.model == "svr":
     raise RuntimeError("SVR 구현하면 이거 지우기")
