@@ -15,6 +15,7 @@ from torch.utils.data import Dataset
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
     def __init__(self, data, scale='minmax', ratio=0.5):
+        # mask ratio fixed ? or random sampling?
         self.ratio = ratio
         self.cont_tensor = torch.zeros([124,5])
         self.cat_tensor = torch.zeros([124,7])
@@ -24,7 +25,10 @@ class Tabledata(Dataset):
         data['cluster'] = data['cluster'].map({value: idx for idx, value in enumerate(sorted(data['cluster'].unique()))})
         for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
             # minmax_col(data, c)
-            meanvar_col(data, c)
+            if scale == 'minmax':
+                minmax_col(data, c)
+            elif scale =='normalization':
+                meanvar_col(data, c)
         grouped = data.groupby('cluster')['diff_days'].agg(['max', 'min'])
         data['d'] = data['cluster'].map(lambda x: (grouped.loc[x, 'max'] - grouped.loc[x, 'min']) + 1)
         if scale == 'minmax':
@@ -63,54 +67,7 @@ class Tabledata(Dataset):
         cont_tensor_p = cont_tensor[:, :3]
         cont_tensor_c = cont_tensor[:, 3:]
         y = torch.tensor(self.y[self.cluster == index])
-        return cont_tensor_p,cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y[0]
-
-class Seqdata(Dataset):
-    def __init__(self, data):
-        for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
-            # minmax_col(data, c)
-            meanvar_col(data, c)
-        # miny, maxy = minmax_col(data,"y")
-        # meany, vary = meanvar_col(data, "y")
-
-        sub_y = []
-        for _, group in data.groupby('cluster'):
-            group['sub_y'] = group['diff_days'].map(group['diff_days'].value_counts())
-            sub_y.extend(group['sub_y'].tolist())
-        data['sub_y'] = sub_y
-    
-        data=data[['cluster', 'age',  'CT_R', 'CT_E', 'gender', 'is_korean', 'primary case', 'job_idx','rep_idx', # patient datas
-                   'dis', 'danger', 'place_idx', 'add_idx', 'y', 'diff_days', 'sub_y']]                           # cluster datas
-        data = data.sort_values(by=["cluster", "diff_days"], ascending=[True, True])
-        print(data)
-        self.cont_P = data.iloc[:, 1:4].values.astype('float32') 
-        self.disc_P = data.iloc[:, 4:9].astype('category')
-        self.cont_C = data.iloc[:, 9:11].values.astype('float32') 
-        self.disc_C = data.iloc[:, 11:13].astype('category')
-        
-        self.y = data.iloc[:, -2:].values.astype('float32')
-
-        # 범주형 데이터 처리 - 0~n 까지로 맞춰줌
-        self.disc_P_cols = self.disc_P.columns
-        self.disc_P_map = {col: {cat: i for i, cat in enumerate(self.disc_P[col].cat.categories)} for col in self.disc_P_cols}
-        self.disc_P = self.disc_P.apply(lambda x: x.cat.codes)
-        self.disc_P = torch.from_numpy(self.disc_P.to_numpy()).long()
-        
-        self.disc_C_cols = self.disc_C.columns
-        self.disc_C_map = {col: {cat: i for i, cat in enumerate(self.disc_C[col].cat.categories)} for col in self.disc_C_cols}
-        self.disc_C = self.disc_C.apply(lambda x: x.cat.codes)
-        self.disc_C = torch.from_numpy(self.disc_C.to_numpy()).long()
-
-    def __len__(self):
-        return len(self.cont_P)
-
-    def __getitem__(self, index):
-        cont_C = torch.from_numpy(self.cont_C[index])
-        cont_P = torch.from_numpy(self.cont_P[index])
-        disc_C = self.disc_C[index]
-        disc_P = self.disc_P[index]
-        y = torch.tensor(self.y[index])
-        return cont_P, disc_P, cont_C, disc_C, y
+        return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y[0]
 
 def delete_rows_by_ratio(tensor, ratio):
     tensor_size = tensor.size()
@@ -120,6 +77,16 @@ def delete_rows_by_ratio(tensor, ratio):
     tensor = tensor[:tensor_size[0] - num_rows_to_delete]
     
     return tensor
+
+def delete_df_rows_by_ratio(df, ratio):
+    cluster_groups = df.groupby('cluster')  # 'cluster' 열을 기준으로 그룹화
+    for _, group in cluster_groups:
+        group_size = len(group)
+        num_rows_to_delete = math.ceil(group_size * ratio)
+        num_rows_to_delete = min(num_rows_to_delete, group_size - 1) # 그룹의 크기보다 크게 삭제하지 않도록 함
+        df.drop(group.tail(num_rows_to_delete).index, inplace=True)  # 뒤에서 일정 개수의 행 삭제
+    df = df.reset_index(drop=True)
+    return df
 
 ## MinMax Scaling Functions ------------------------------------
 def minmax_col(data, name):

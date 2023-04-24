@@ -8,7 +8,7 @@ import os, time
 import argparse
 import tabulate
 
-import utils, models
+import utils, models, ml_algorithm
 import wandb
 from torch.utils.data import DataLoader
 
@@ -64,7 +64,7 @@ parser.add_argument(
 parser.add_argument(
     "--model",
     type=str, default='mlp',
-    choices=["transformer", "linear", "ridge", "mlp", "svr"],
+    choices=["transformer", "linear", "ridge", "mlp", "svr", "rfr"],
     help="model name (default : mlp)")
 
 parser.add_argument("--save_path",
@@ -154,6 +154,7 @@ args = parser.parse_args()
 ## Set seed and device ----------------------------------------------------------------
 utils.set_seed(args.seed)
 
+# args.device = torch.device("cpu")
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
 #-------------------------------------------------------------------------------------
@@ -190,9 +191,8 @@ elif args.model in ["linear", "ridge"]:
                     out_channels=args.output_size,
                     apply_embedding=args.apply_embedding).to(args.device)
 
-elif args.model == "svr":
-    raise RuntimeError("SVR 구현하면 이거 지우기")
-
+elif args.model in ["svr", "rfr"]:
+    ml_algorithm.fit(data, args.model, args.ignore_wandb, args.mask_ratio)
 
 
 print(f"Successfully prepare {args.model} model")

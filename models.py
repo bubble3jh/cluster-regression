@@ -4,6 +4,9 @@ import torch.nn.functional as F
 from typing import Optional
 import math
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from sklearn.svm import SVR
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 import pdb
     
 
@@ -54,13 +57,20 @@ class TableEmbedding(torch.nn.Module):
             self.cont_c_NN = nn.Sequential(nn.Linear(2, emb_hidden_dim),
                                         nn.ReLU(),
                                         nn.Linear(emb_hidden_dim, emb_hidden_dim))
-        self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cuda:0')
-        self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
-        self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cuda:0')
-        self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cuda:0')
+        self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cpu')
+        self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cpu')
+        self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cpu')
+        self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cpu')
+        self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cpu')
+        self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cpu')
+        self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cpu')
+        # self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+        # self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+        # self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
+        # self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cuda:0')
+        # self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
+        # self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cuda:0')
+        # self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cuda:0')
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):
         if self.apply_embedding:
@@ -116,7 +126,7 @@ class Transformer(nn.Module):
             output Tensor of shape ``[seq_len, batch_size, ntoken]``
         """
         src = self.encoder(src) * math.sqrt(self.d_model)
-        src = self.pos_encoder(src)
+        # src = self.pos_encoder(src)
         output = self.transformer_encoder(src, src_mask)
         output = self.decoder(output)
         return output
