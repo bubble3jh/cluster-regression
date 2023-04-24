@@ -192,8 +192,8 @@ elif args.model in ["linear", "ridge"]:
                     apply_embedding=args.apply_embedding).to(args.device)
 
 elif args.model in ["svr", "rfr"]:
+    args.device = torch.device("cpu")
     ml_algorithm.fit(data, args.model, args.ignore_wandb, args.mask_ratio)
-
 
 print(f"Successfully prepare {args.model} model")
 # ---------------------------------------------------------------------------------------------

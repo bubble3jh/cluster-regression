@@ -50,27 +50,23 @@ class TableEmbedding(torch.nn.Module):
         self.apply_embedding = apply_embedding
         if apply_embedding:
             print("Embedding applied to data")
-            emb_hidden_dim = output_size//4
+            nn_dim = emb_hidden_dim = emb_dim_c = emb_dim_p = output_size//4
             self.cont_p_NN = nn.Sequential(nn.Linear(3, emb_hidden_dim),
                                         nn.ReLU(),
-                                        nn.Linear(emb_hidden_dim, emb_hidden_dim))
+                                        nn.Linear(emb_hidden_dim, nn_dim))
             self.cont_c_NN = nn.Sequential(nn.Linear(2, emb_hidden_dim),
                                         nn.ReLU(),
-                                        nn.Linear(emb_hidden_dim, emb_hidden_dim))
-        self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cpu')
-        self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cpu')
-        self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cpu')
-        self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cpu')
-        self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cpu')
-        self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cpu')
-        self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cpu')
-        # self.lookup_gender  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        # self.lookup_korean  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        # self.lookup_primary  = nn.Embedding(2, emb_hidden_dim).to('cuda:0')
-        # self.lookup_job  = nn.Embedding(11, emb_hidden_dim).to('cuda:0')
-        # self.lookup_rep  = nn.Embedding(34, emb_hidden_dim).to('cuda:0')
-        # self.lookup_place  = nn.Embedding(19, emb_hidden_dim).to('cuda:0')
-        # self.lookup_add  = nn.Embedding(31, emb_hidden_dim).to('cuda:0')
+                                        nn.Linear(emb_hidden_dim, nn_dim))
+        else:
+            emb_dim_p = 5
+            emb_dim_c = 2
+        self.lookup_gender  = nn.Embedding(2, emb_dim_p).to('cuda:0')
+        self.lookup_korean  = nn.Embedding(2, emb_dim_p).to('cuda:0')
+        self.lookup_primary  = nn.Embedding(2, emb_dim_p).to('cuda:0')
+        self.lookup_job  = nn.Embedding(11, emb_dim_p).to('cuda:0')
+        self.lookup_rep  = nn.Embedding(34, emb_dim_p).to('cuda:0')
+        self.lookup_place  = nn.Embedding(19, emb_dim_c).to('cuda:0')
+        self.lookup_add  = nn.Embedding(31, emb_dim_c).to('cuda:0')
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):
         if self.apply_embedding:
@@ -80,9 +76,9 @@ class TableEmbedding(torch.nn.Module):
         a2_embs = self.lookup_korean(cat_p[:,:,1].to(torch.int))
         a3_embs = self.lookup_primary(cat_p[:,:,2].to(torch.int))
         a4_embs = self.lookup_job(cat_p[:,:,3].to(torch.int))
-        a7_embs = self.lookup_rep(cat_p[:,:,4].to(torch.int))
-        a5_embs = self.lookup_place(cat_c[:,:,0].to(torch.int))
-        a6_embs = self.lookup_add(cat_c[:,:,1].to(torch.int))
+        a5_embs = self.lookup_rep(cat_p[:,:,4].to(torch.int))
+        a6_embs = self.lookup_place(cat_c[:,:,0].to(torch.int))
+        a7_embs = self.lookup_add(cat_c[:,:,1].to(torch.int))
         # categorical datas embedding 평균
         cat_p = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
         cat_c = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
