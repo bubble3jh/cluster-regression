@@ -23,6 +23,7 @@ def fit(data, model, ignore_wandb, mask_ratio):
     continuous_cols = df.columns[1:6]
     scaler = StandardScaler()
     df[continuous_cols] = scaler.fit_transform(df[continuous_cols])
+    df[['d','y']] = scaler.fit_transform(df[['d', 'y']])
     categorical_cols = df.columns[6:12]
     encoder = OneHotEncoder()
     one_hot = encoder.fit_transform(df[categorical_cols]).toarray()
