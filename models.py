@@ -86,12 +86,11 @@ class TableEmbedding(torch.nn.Module):
         x = torch.stack(sliced_tensors, dim=0)
         return x
 
-class TransformerModel(nn.Module):
+class Transformer(nn.Module):
 
     def __init__(self, ntoken: int, d_model: int, nhead: int, d_hid: int,
                  nlayers: int, dropout: float = 0.5):
         super().__init__()
-        self.model_type = 'Transformer'
         self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout)
         self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
