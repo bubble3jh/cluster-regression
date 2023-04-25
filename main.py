@@ -4,13 +4,14 @@ import numpy as np
 import pandas as pd
 
 import os, time
+import math
 
 import argparse
 import tabulate
 
 import utils, models, ml_algorithm
 import wandb
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
 # import warnings
 # warnings.filterwarnings('ignore')
@@ -169,7 +170,10 @@ if args.ignore_wandb == False:
 data = pd.read_csv(args.data_path)
 dataset = utils.Tabledata(data, args.scaling, args.mask_ratio)
 # dataset = utils.Seqdata(data)
-dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
+tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+te_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 print("Successfully load data!")
 #-------------------------------------------------------------------------------------
 
@@ -201,19 +205,15 @@ print(f"Successfully prepare {args.model} model")
 
 ## Criterion ------------------------------------------------------------------------------
 # Train Criterion
-if args.criterion == 'MSE':
-    criterion = nn.MSELoss() 
-
-elif args.criterion == "RMSE":
-    criterion = utils.RMSELoss()
-
+if args.criterion in ['MSE', 'RMSE']:
+    criterion = nn.MSELoss(reduction="sum") 
 
 # Validation Criterion
 if args.eval_criterion == 'MAE':
-    eval_criterion = nn.L1Loss()
+    eval_criterion = nn.L1Loss(reduction="sum")
 
 elif args.eval_criterion == "RMSE":
-    eval_criterion = utils.RMSELoss()
+    eval_criterion = nn.MSELoss(reduction="sum")
     
 
 # ---------------------------------------------------------------------------------------------
@@ -234,16 +234,16 @@ else:
 
 
 ## Training Phase -----------------------------------------------------------------------------
-columns = ["ep", "lr", f"tr_loss({args.criterion})", f"val_loss({args.eval_criterion})",
-           "te_loss(MAE)", "te_loss(RMSE)", "time"]
+columns = ["ep", "lr", f"tr_loss_d({args.criterion})", f"tr_loss_y({args.criterion})", f"val_loss_d({args.eval_criterion})", f"val_loss_y({args.eval_criterion})",
+           "te_loss_d(MAE)", "te_loss_y(MAE)", "te_loss_d(RMSE)", "te_loss_y(RMSE)", "time"]
 
-best_val_loss = 9999
+best_val_loss_d = best_val_loss_y = 9999
 
 for epoch in range(1, args.epochs + 1):
     time_ep = time.time()
     lr = optimizer.param_groups[0]['lr']
 
-    tr_epoch_loss = 0; val_epoch_loss = 0; te_mae_epoch_loss = 0; te_rmse_epoch_loss = 0
+    tr_epoch_loss_d = 0; tr_epoch_loss_y = 0; val_epoch_loss_d = 0; val_epoch_loss_y = 0; te_mae_epoch_loss_d = 0; te_mae_epoch_loss_y = 0; te_mse_epoch_loss_d = 0; te_mse_epoch_loss_y = 0
 
     total_tr_num_data = 0; total_val_num_data = 0; total_te_num_data = 0
 
@@ -253,60 +253,75 @@ for epoch in range(1, args.epochs + 1):
     tr_gt_d_list = []; val_gt_d_list = []; te_gt_d_list = []
     tr_pred_d_list = []; val_pred_d_list = []; te_pred_d_list = []
 
-    for itr, data in enumerate(dataloader):
-        tr_batch_loss, tr_num_data, tr_predicted, tr_ground_truth = utils.train(data, model, optimizer, criterion, args.lamb)
-        val_batch_loss, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
-                                                                            args.scaling, dataset.a_y, dataset.b_y,
-                                                                            dataset.a_d, dataset.b_d)
-        te_mae_batch_loss, te_rmse_batch_loss, te_num_data, te_predicted, te_ground_truth = utils.test(data, model,
-                                                                            args.scaling, dataset.a_y, dataset.b_y,
-                                                                            dataset.a_d, dataset.b_d)
-        tr_epoch_loss += tr_batch_loss
-        val_epoch_loss += val_batch_loss
-        te_mae_epoch_loss += te_mae_batch_loss
-        te_rmse_epoch_loss += te_rmse_batch_loss
-
+    for itr, data in enumerate(tr_dataloader):
+        tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth = utils.train(data, model, optimizer, criterion, args.lamb)
+        tr_epoch_loss_d += tr_batch_loss_d
+        tr_epoch_loss_y += tr_batch_loss_y
         total_tr_num_data += tr_num_data
+
+        # tr_pred_y_list += list(tr_pred_y.cpu().detach().numpy())
+        # tr_gt_y_list += list(tr_gt_y.cpu().detach().numpy())
+        # tr_pred_d_list += list(tr_pred_d.cpu().detach().numpy())
+        # tr_gt_d_list += list(tr_gt_d.cpu().detach().numpy())
+
+    for itr, data in enumerate(val_dataloader):
+        val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
+                                                                            args.scaling, dataset.a_y, dataset.b_y,
+                                                                            dataset.a_d, dataset.b_d)
+        val_epoch_loss_d += val_batch_loss_d
+        val_epoch_loss_y += val_batch_loss_y
         total_val_num_data += val_num_data
-        total_te_num_data += te_num_data
 
-        # Restore Prediction and Ground Truth
-        if args.scaling == "minmax":
-            tr_pred_y = utils.restore_minmax(tr_predicted[:, 0], dataset.a_y, dataset.b_y)
-            tr_gt_y = utils.restore_minmax(tr_ground_truth[:, 0], dataset.a_y, dataset.b_y)
-            tr_pred_d = utils.restore_minmax(tr_predicted[:, 1], dataset.a_d, dataset.b_d)
-            tr_gt_d = utils.restore_minmax(tr_ground_truth[:, 1], dataset.a_d, dataset.b_d)
-                      
-        elif args.scaling == "normalization":
-            tr_pred_y = utils.restore_meanvar(tr_predicted[:, 0], dataset.a_y, dataset.b_y)
-            tr_gt_y = utils.restore_meanvar(tr_ground_truth[:, 0], dataset.a_y, dataset.b_y)
-            tr_pred_d = utils.restore_meanvar(tr_predicted[:, 1], dataset.a_d, dataset.b_d)
-            tr_gt_d = utils.restore_meanvar(tr_ground_truth[:, 1], dataset.a_d, dataset.b_d)
-
-        tr_pred_y_list += list(tr_pred_y.cpu().detach().numpy())
-        tr_gt_y_list += list(tr_gt_y.cpu().detach().numpy())
-        tr_pred_d_list += list(tr_pred_d.cpu().detach().numpy())
-        tr_gt_d_list += list(tr_gt_d.cpu().detach().numpy())
-        
         val_pred_y_list += list(val_predicted[:,0].cpu().detach().numpy())
         val_gt_y_list += list(val_ground_truth[:,0].cpu().detach().numpy())
         val_pred_d_list += list(val_predicted[:,1].cpu().detach().numpy())
         val_gt_d_list += list(val_ground_truth[:,1].cpu().detach().numpy())
 
-        te_pred_y_list += list(te_predicted[:,0].cpu().detach().numpy())
-        te_gt_y_list += list(te_ground_truth[:,0].cpu().detach().numpy())
-        te_pred_d_list += list(te_predicted[:,1].cpu().detach().numpy())
-        te_gt_d_list += list(te_ground_truth[:,1].cpu().detach().numpy())
-        
+    for itr, data in enumerate(te_dataloader):
+        te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth = utils.test(data, model,
+                                                                            args.scaling, dataset.a_y, dataset.b_y,
+                                                                            dataset.a_d, dataset.b_d)
+        te_mae_epoch_loss_d += te_mae_batch_loss_d
+        te_mae_epoch_loss_y += te_mae_batch_loss_y
+        te_mse_epoch_loss_d += te_mse_batch_loss_d
+        te_mse_epoch_loss_y += te_mse_batch_loss_y
+        total_te_num_data += te_num_data
+
+        # Restore Prediction and Ground Truth
+        if args.scaling == "minmax":
+            te_pred_y = utils.restore_minmax(te_predicted[:, 0], dataset.a_y, dataset.b_y)
+            te_gt_y = utils.restore_minmax(te_ground_truth[:, 0], dataset.a_y, dataset.b_y)
+            te_pred_d = utils.restore_minmax(te_predicted[:, 1], dataset.a_d, dataset.b_d)
+            te_gt_d = utils.restore_minmax(te_ground_truth[:, 1], dataset.a_d, dataset.b_d)
+                      
+        elif args.scaling == "normalization":
+            te_pred_y = utils.restore_meanvar(te_predicted[:, 0], dataset.a_y, dataset.b_y)
+            te_gt_y = utils.restore_meanvar(te_ground_truth[:, 0], dataset.a_y, dataset.b_y)
+            te_pred_d = utils.restore_meanvar(te_predicted[:, 1], dataset.a_d, dataset.b_d)
+            te_gt_d = utils.restore_meanvar(te_ground_truth[:, 1], dataset.a_d, dataset.b_d)
+
+        te_pred_y_list += list(te_pred_y.cpu().detach().numpy())
+        te_gt_y_list += list(te_gt_y.cpu().detach().numpy())
+        te_pred_d_list += list(te_pred_d.cpu().detach().numpy())
+        te_gt_d_list += list(te_gt_d.cpu().detach().numpy())
     # Calculate Epoch Loss
-    tr_loss = tr_epoch_loss / total_tr_num_data
-    val_loss = val_epoch_loss / total_val_num_data
-    te_mae_loss = te_mae_epoch_loss / total_te_num_data
-    te_rmse_loss = te_rmse_epoch_loss / total_te_num_data
-    
+    tr_loss_d = tr_epoch_loss_d / total_tr_num_data
+    tr_loss_y = tr_epoch_loss_y / total_tr_num_data
+    if args.criterion == "RMSE":
+        tr_loss_d = math.sqrt(tr_loss_d)
+        tr_loss_y = math.sqrt(tr_loss_y)
+    val_loss_d = val_epoch_loss_d / total_val_num_data
+    val_loss_y = val_epoch_loss_y / total_val_num_data
+    if args.eval_criterion == "RMSE":
+        val_loss_d = math.sqrt(val_loss_d)
+        val_loss_y = math.sqrt(val_loss_y)
+    te_mae_loss_d = te_mae_epoch_loss_d / total_te_num_data
+    te_mae_loss_y = te_mae_epoch_loss_y / total_te_num_data
+    te_rmse_loss_d = math.sqrt(te_mse_epoch_loss_d / total_te_num_data)
+    te_rmse_loss_y = math.sqrt(te_mse_epoch_loss_y / total_te_num_data)
     time_ep = time.time() - time_ep
 
-    values = [epoch, lr, tr_loss, val_loss, te_mae_loss, te_rmse_loss, time_ep,]
+    values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d, val_loss_y, te_mae_loss_d, te_mae_loss_y, te_rmse_loss_d, te_rmse_loss_y, time_ep,]
 
     table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
     if epoch % 20 == 0 or epoch == 1:
@@ -320,11 +335,14 @@ for epoch in range(1, args.epochs + 1):
         scheduler.step()
 
     # Save Best Model (Early Stopping)
-    if val_loss < best_val_loss:
+    if val_loss_d + val_loss_y < best_val_loss_d + best_val_loss_y:
         best_epoch = epoch
-        best_val_loss = val_loss
-        best_te_mae_loss = te_mae_loss
-        best_te_rmse_loss = te_rmse_loss
+        best_val_loss_d = val_loss_d
+        best_val_loss_y = val_loss_y
+        best_te_mae_loss_d = te_mae_loss_d
+        best_te_mae_loss_y = te_mae_loss_y
+        best_te_rmse_loss_d = te_rmse_loss_d
+        best_te_rmse_loss_y = te_rmse_loss_y
         
         # save state_dict
         os.makedirs(args.save_path, exist_ok=True)
@@ -350,24 +368,30 @@ for epoch in range(1, args.epochs + 1):
     
     if not args.ignore_wandb:
         wandb.log({"lr" : lr,
-                "tr_loss" : tr_loss,
-                "val_loss": val_loss,
-                "te_mae_loss" : te_mae_loss,
-                "te_rmse_loss" : te_rmse_loss,
+                "tr_loss (d)" : tr_loss_d,
+                "tr_loss (y)" : tr_loss_y,
+                "val_loss (d)": val_loss_d,
+                "val_loss (y)": val_loss_y,
+                "te_mae_loss (d)" : te_mae_loss_d,
+                "te_mae_loss (y)" : te_mae_loss_y,
+                "te_rmse_loss (d)" : te_rmse_loss_d,
+                "te_rmse_loss (y)" : te_rmse_loss_y,
                 })
 # ---------------------------------------------------------------------------------------------
 
 
 
 ## Print Best Model ---------------------------------------------------------------------------
-print(f"Best {args.model} achieved {best_te_mae_loss} on {best_epoch} epoch!!")
+print(f"Best {args.model} achieved [d:{best_te_mae_loss_d}, y:{best_te_mae_loss_y}] on {best_epoch} epoch!!")
 print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt'!!")
-
 if args.ignore_wandb == False:
     wandb.run.summary["best_epoch"]  = best_epoch
-    wandb.run.summary["best_val_loss"] = best_val_loss
-    wandb.run.summary["best_te_mae_loss"] = best_te_mae_loss
-    wandb.run.summary["best_te_rmse_loss"] = best_te_rmse_loss
+    wandb.run.summary["best_val_loss (d)"] = best_val_loss_d
+    wandb.run.summary["best_val_loss (y)"] = best_val_loss_y
+    wandb.run.summary["best_te_mae_loss (d)"] = best_te_mae_loss_d
+    wandb.run.summary["best_te_mae_loss (y)"] = best_te_mae_loss_y
+    wandb.run.summary["best_te_rmse_loss (d)"] = best_te_rmse_loss_d
+    wandb.run.summary["best_te_rmse_loss (y)"] = best_te_rmse_loss_y
     wandb.run.summary["tr_dat_num"] = total_tr_num_data
     wandb.run.summary["val_dat_num"] : total_val_num_data
     wandb.run.summary["te_dat_num"] : total_te_num_data

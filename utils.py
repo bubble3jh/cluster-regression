@@ -115,13 +115,15 @@ def restore_meanvar(data, mean, var):
 
 ## Loss ----------------------------------------------------------------------------------------
 class RMSELoss(nn.Module):
-    def __init__(self):
+    def __init__(self, reduction):
         super(RMSELoss,self).__init__()
-        self.mse = nn.MSELoss()
+        self.mse = nn.MSELoss(reduction=reduction)
         self.eps = 1e-12
 
     def forward(self, target, pred):
-        return torch.sqrt(self.mse(target, pred) + self.eps)
+        x = torch.sqrt(self.mse(target, pred) + self.eps)
+        # print(x.shape)
+        return x
 # ---------------------------------------------------------------------------------------------
 
 
@@ -144,7 +146,7 @@ def train(data, model, optimizer, criterion, lamb=0.0):
     if not torch.isnan(loss):
         loss.backward()
         optimizer.step()
-        return loss.item(), batch_num, out, y
+        return loss_d.item(), loss_y.item(), batch_num, out, y
     else:
         return 0, batch_num, out, y
 
@@ -177,7 +179,7 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
     loss_d = eval_criterion(pred_d, gt_d)
     loss = loss_y + loss_d
     if not torch.isnan(loss):
-        return loss.item(), batch_num, out, y
+        return loss_d.item(), loss_y.item(), batch_num, out, y
     else:
         return 0, batch_num, out, y
     
@@ -187,8 +189,8 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
 @torch.no_grad()
 def test(data, model, scaling, a_y, b_y, a_d, b_d):
     
-    criterion_mae = nn.L1Loss()
-    criterion_rmse = RMSELoss()
+    criterion_mae = nn.L1Loss(reduction="sum")
+    criterion_rmse = nn.MSELoss(reduction="sum")
     
     model.eval()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
@@ -211,15 +213,13 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d):
     mae_y = criterion_mae(pred_y, gt_y)
     mae_d = criterion_mae(pred_d, gt_d)
     mae = mae_y + mae_d
-    
     # RMSE
     rmse_y = criterion_rmse(pred_y, gt_y)
     rmse_d = criterion_rmse(pred_d, gt_d)
     rmse = rmse_y + rmse_d
     
-    
     if not torch.isnan(mae) and not torch.isnan(rmse):
-        return mae.item(), rmse.item(), batch_num, out, y
+        return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), batch_num, out, y
     else:
         return 0, batch_num, out, y
 
@@ -248,3 +248,10 @@ def save_checkpoint(file_path, epoch, **kwargs):
     state = {"epoch": epoch}
     state.update(kwargs)
     torch.save(state, file_path)
+
+def data_split_num(dataset, tr=0.8, val=0.1, te=0.1):
+    train_length = int(tr * len(dataset))
+    val_length = int(val * len(dataset))
+    test_length = len(dataset) - train_length - val_length
+
+    return train_length, val_length, test_length
