@@ -11,14 +11,11 @@ import pdb
     
 
 class MLPRegressor(nn.Module):
-    '''
-    embedding 태워서 input으로 넣도록 수정 필요
-    '''
-    def __init__(self, input_size=128, hidden_size=64, output_size=2, drop_out=0.0, apply_embedding=True):
+    def __init__(self, input_size=128, hidden_size=64, output_size=2, drop_out=0.0, disable_embedding=False):
         super().__init__()
-        if not apply_embedding:
+        if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(128, apply_embedding = apply_embedding)
+        self.embedding = TableEmbedding(128, disable_embedding = disable_embedding)
         self.fc1 = nn.Linear(input_size, hidden_size, bias=True)
         self.fc2 = nn.Linear(hidden_size, output_size, bias=True)
         # self.fc3 = nn.Linear(hidden_size, output_size, bias=True)
@@ -32,11 +29,11 @@ class MLPRegressor(nn.Module):
         return x
 
 class LinearRegression(torch.nn.Module):
-    def __init__(self, input_size=128, out_channels=2, apply_embedding=True):
+    def __init__(self, input_size=128, out_channels=2, disable_embedding=False):
         super().__init__()
-        if not apply_embedding:
+        if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(128, apply_embedding = apply_embedding)
+        self.embedding = TableEmbedding(128, disable_embedding = disable_embedding)
         self.linear1 = torch.nn.Linear(input_size, out_channels)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):
@@ -45,10 +42,10 @@ class LinearRegression(torch.nn.Module):
         return x
 
 class TableEmbedding(torch.nn.Module):
-    def __init__(self, output_size=128, apply_embedding=True):
+    def __init__(self, output_size=128, disable_embedding=False):
         super().__init__()
-        self.apply_embedding = apply_embedding
-        if apply_embedding:
+        self.disable_embedding = disable_embedding
+        if not disable_embedding:
             print("Embedding applied to data")
             nn_dim = emb_hidden_dim = emb_dim_c = emb_dim_p = output_size//4
             self.cont_p_NN = nn.Sequential(nn.Linear(3, emb_hidden_dim),
@@ -69,7 +66,7 @@ class TableEmbedding(torch.nn.Module):
         self.lookup_add  = nn.Embedding(31, emb_dim_c).to('cuda:0')
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):
-        if self.apply_embedding:
+        if not self.disable_embedding:
             cont_p = self.cont_p_NN(cont_p)
             cont_c = self.cont_c_NN(cont_c)
         a1_embs = self.lookup_gender(cat_p[:,:,0].to(torch.int))
@@ -93,7 +90,6 @@ class TableEmbedding(torch.nn.Module):
         return x
 
 class Transformer(nn.Module):
-
     def __init__(self, ntoken: int, d_model: int, nhead: int, d_hid: int,
                  nlayers: int, dropout: float = 0.5):
         super().__init__()
@@ -151,10 +147,3 @@ class PositionalEncoding(nn.Module):
         """
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
-
-class SVR(torch.nn.Module):
-    def __init__(self):
-        pass
-
-    def forward(self):
-        pass

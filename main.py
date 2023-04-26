@@ -102,8 +102,14 @@ parser.add_argument(
     help="Cluster Mask Ratio (Default : 0.5)"
 )
 
-parser.add_argument("--apply_embedding", action='store_false',
-        help = "Apply embedding to raw data (Default : True)")
+parser.add_argument(
+    "--date_cutoff",
+    type=int, default=2,
+    help="Cluster Date cutoff threshold (Default : 2)"
+)
+
+parser.add_argument("--disable_embedding", action='store_true',
+        help = "Disable embedding to raw data (Default : False)")
 
 #----------------------------------------------------------------
 
@@ -168,7 +174,7 @@ if args.ignore_wandb == False:
 
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
-dataset = utils.Tabledata(data, args.scaling, args.mask_ratio)
+dataset = utils.Tabledata(data, args.date_cutoff, args.scaling)
 # dataset = utils.Seqdata(data)
 train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -188,16 +194,16 @@ elif args.model == "mlp":
                     hidden_size=args.hidden_dim,
                     output_size=args.output_size,
                     drop_out=args.drop_out,
-                    apply_embedding=args.apply_embedding).to(args.device)
+                    disable_embedding=args.disable_embedding).to(args.device)
 
 elif args.model in ["linear", "ridge"]:
     model = models.LinearRegression(input_size=args.num_features,
                     out_channels=args.output_size,
-                    apply_embedding=args.apply_embedding).to(args.device)
+                    disable_embedding=args.disable_embedding).to(args.device)
 
 elif args.model in ["svr", "rfr"]:
     args.device = torch.device("cpu")
-    ml_algorithm.fit(data, args.model, args.ignore_wandb, args.mask_ratio)
+    ml_algorithm.fit(data, args.model, args.ignore_wandb, args.date_cutoff)
 
 print(f"Successfully prepare {args.model} model")
 # ---------------------------------------------------------------------------------------------
@@ -259,10 +265,10 @@ for epoch in range(1, args.epochs + 1):
         tr_epoch_loss_y += tr_batch_loss_y
         total_tr_num_data += tr_num_data
 
-        # tr_pred_y_list += list(tr_pred_y.cpu().detach().numpy())
-        # tr_gt_y_list += list(tr_gt_y.cpu().detach().numpy())
-        # tr_pred_d_list += list(tr_pred_d.cpu().detach().numpy())
-        # tr_gt_d_list += list(tr_gt_d.cpu().detach().numpy())
+        tr_pred_y_list += list(tr_predicted[:,0].cpu().detach().numpy())
+        tr_gt_y_list += list(tr_ground_truth[:,0].cpu().detach().numpy())
+        tr_pred_d_list += list(tr_predicted[:,1].cpu().detach().numpy())
+        tr_gt_d_list += list(tr_ground_truth[:,1].cpu().detach().numpy())
 
     for itr, data in enumerate(val_dataloader):
         val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
@@ -288,17 +294,7 @@ for epoch in range(1, args.epochs + 1):
         total_te_num_data += te_num_data
 
         # Restore Prediction and Ground Truth
-        if args.scaling == "minmax":
-            te_pred_y = utils.restore_minmax(te_predicted[:, 0], dataset.a_y, dataset.b_y)
-            te_gt_y = utils.restore_minmax(te_ground_truth[:, 0], dataset.a_y, dataset.b_y)
-            te_pred_d = utils.restore_minmax(te_predicted[:, 1], dataset.a_d, dataset.b_d)
-            te_gt_d = utils.restore_minmax(te_ground_truth[:, 1], dataset.a_d, dataset.b_d)
-                      
-        elif args.scaling == "normalization":
-            te_pred_y = utils.restore_meanvar(te_predicted[:, 0], dataset.a_y, dataset.b_y)
-            te_gt_y = utils.restore_meanvar(te_ground_truth[:, 0], dataset.a_y, dataset.b_y)
-            te_pred_d = utils.restore_meanvar(te_predicted[:, 1], dataset.a_d, dataset.b_d)
-            te_gt_d = utils.restore_meanvar(te_ground_truth[:, 1], dataset.a_d, dataset.b_d)
+        te_pred_y, te_pred_d, te_gt_y, te_gt_d= utils.reverse_scaling(args.scaling, te_predicted, te_ground_truth, dataset.a_y, dataset.b_y, dataset.a_d, dataset.b_d)
 
         te_pred_y_list += list(te_pred_y.cpu().detach().numpy())
         te_gt_y_list += list(te_gt_y.cpu().detach().numpy())
