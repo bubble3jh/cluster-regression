@@ -97,12 +97,6 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--mask_ratio",
-    type=float, default=0.5,
-    help="Cluster Mask Ratio (Default : 0.5)"
-)
-
-parser.add_argument(
     "--date_cutoff",
     type=int, default=2,
     help="Cluster Date cutoff threshold (Default : 2)"
@@ -382,12 +376,19 @@ print(f"Best {args.model} achieved [d:{best_te_mae_loss_d}, y:{best_te_mae_loss_
 print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt'!!")
 if args.ignore_wandb == False:
     wandb.run.summary["best_epoch"]  = best_epoch
+    
     wandb.run.summary["best_val_loss (d)"] = best_val_loss_d
     wandb.run.summary["best_val_loss (y)"] = best_val_loss_y
+    wandb.run.summary["best_val_loss"] = best_val_loss_d + best_val_loss_y
+    
     wandb.run.summary["best_te_mae_loss (d)"] = best_te_mae_loss_d
     wandb.run.summary["best_te_mae_loss (y)"] = best_te_mae_loss_y
+    wandb.run.summary["best_te_mae_loss"] = best_te_mae_loss_d + best_te_mae_loss_y
+    
     wandb.run.summary["best_te_rmse_loss (d)"] = best_te_rmse_loss_d
     wandb.run.summary["best_te_rmse_loss (y)"] = best_te_rmse_loss_y
+    wandb.run.summary["best_te_rmse_loss"] = best_te_rmse_loss_d + best_te_rmse_loss_y
+    
     wandb.run.summary["tr_dat_num"] = total_tr_num_data
     wandb.run.summary["val_dat_num"] : total_val_num_data
     wandb.run.summary["te_dat_num"] : total_te_num_data
