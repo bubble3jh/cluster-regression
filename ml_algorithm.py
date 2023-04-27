@@ -33,7 +33,6 @@ def fit(data, model, ignore_wandb, date_cutoff):
     encoder = OneHotEncoder()
     one_hot = encoder.fit_transform(data[categorical_cols]).toarray()
     data = data.drop(categorical_cols, axis=1)
-    x=pd.DataFrame(one_hot, columns=encoder.get_feature_names_out(categorical_cols), index=data.index)
     data = pd.concat([data, pd.DataFrame(one_hot, columns=encoder.get_feature_names_out(categorical_cols), index=data.index)], axis=1)
     # data.to_csv('temp.csv')
     y_col = data.pop('y')
