@@ -1,6 +1,6 @@
 
 ## Coarse Search
-# ## Constant
+## Constant
 for lr_init in 1e-2 1e-3 1e-4
 do
 for wd in 1e-3 1e-4 1e-5
