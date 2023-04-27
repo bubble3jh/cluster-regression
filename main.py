@@ -130,8 +130,6 @@ parser.add_argument("--optim", type=str, default="adam",
 parser.add_argument("--momentum", type=float, default=0.9,
                 help="momentum (Default : 0.9)")
 
-parser.add_argument("--nesterov", action='store_true',  help="Nesterov (Default : False)")
-
 parser.add_argument("--epochs", type=int, default=300, metavar="N",
     help="number epochs to train (Default : 300)")
 
@@ -164,8 +162,11 @@ print(f"Device : {args.device}")
 if args.ignore_wandb == False:
     wandb.init(entity="mlai_medical_ai", project="cluster-regression")
     wandb.config.update(args)
-    wandb.run.name = f"{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
-
+    if args.disable_embedding:
+        wandb.run.name = f"raw_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
+    else:
+        wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
+       
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
 dataset = utils.Tabledata(data, args.date_cutoff, args.scaling)
@@ -222,7 +223,7 @@ elif args.eval_criterion == "RMSE":
 if args.optim == "adam":
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr_init, weight_decay=args.wd)
 elif args.optim == "sgd":
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr_init, momentum=args.momentum, weight_decay=args.wd, nesterov=args.nesterov)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr_init, momentum=args.momentum, weight_decay=args.wd)
 else:
     raise NotImplementedError
 
