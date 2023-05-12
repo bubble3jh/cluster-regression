@@ -184,8 +184,8 @@ if args.eval_date != 0:
     test_dataset = te_datasets[args.eval_date-1]
 else:
     val_dataset = ConcatDataset(val_datasets)
-    te_dataset = ConcatDataset(te_datasets)
-print(f"Number of evaluation Clusters : {len(val_dataset)}, {len(te_dataset)}")
+    test_dataset = ConcatDataset(te_datasets)
+print(f"Number of evaluation Clusters : {len(val_dataset)}, {len(test_dataset)}")
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 te_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
