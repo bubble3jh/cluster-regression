@@ -63,7 +63,8 @@ class Tabledata(Dataset):
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
         self.cat_X = self.cat_X.apply(lambda x: x.cat.codes)
         self.cat_X = torch.from_numpy(self.cat_X.to_numpy()).long()
-
+        # data.to_csv(f'data_{date_cutoff}.csv', index=False)
+        # yd.to_csv(f'yd_{date_cutoff}.csv', index=False)
     def __len__(self):
         return len(np.unique(self.cluster))
 
@@ -74,7 +75,6 @@ class Tabledata(Dataset):
         # 0인 tensor 복제해서 구역 할당
         cont_tensor = self.cont_tensor.clone()
         cont_tensor[:cont_X.shape[0],] = cont_X
-        ### self.cluster 가 마지막 dataset걸로 뒤집어 써져버림. concat한 dataset에 맞게 되게끔 해결 필요
         cat_X = self.cat_X[self.cluster == index]
         # cat_X = delete_rows_by_ratio(cat_X, self.ratio)
         cat_tensor = self.cat_tensor.clone()

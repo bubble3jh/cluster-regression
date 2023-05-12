@@ -98,8 +98,8 @@ parser.add_argument(
 
 parser.add_argument(
     "--eval_date",
-    type=int, default=2, choices=[1, 2, 3, 4, 5],
-    help="Cluster Date evaluation date (Default : 2)"
+    type=int, default=2, choices=[0, 1, 2, 3, 4, 5],
+    help="Cluster Date evaluation date (Default : 2) if 0, use concated dataset"
 )
 
 parser.add_argument("--disable_embedding", action='store_true',
@@ -178,8 +178,14 @@ for i in range(1, 6):
     te_datasets.append(test_dataset)
 
 tr_dataset = ConcatDataset(tr_datasets)
-val_dataset = val_datasets[args.eval_date-1]
 print(f"Number of training Clusters : {len(tr_dataset)}")
+if args.eval_date != 0:
+    val_dataset = val_datasets[args.eval_date-1]
+    test_dataset = te_datasets[args.eval_date-1]
+else:
+    val_dataset = ConcatDataset(val_datasets)
+    te_dataset = ConcatDataset(te_datasets)
+print(f"Number of evaluation Clusters : {len(val_dataset)}, {len(te_dataset)}")
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 te_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
