@@ -163,9 +163,9 @@ if args.ignore_wandb == False:
     wandb.init(entity="mlai_medical_ai", project="cluster-regression")
     wandb.config.update(args)
     if args.disable_embedding:
-        wandb.run.name = f"raw_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
+        wandb.run.name = f"raw_{args.model}({args.hidden_dim})-date{args.eval_date}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
     else:
-        wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
+        wandb.run.name = f"embed_{args.model}({args.hidden_dim})-date{args.eval_date}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
        
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
@@ -376,6 +376,7 @@ for epoch in range(1, args.epochs + 1):
                     "tr_loss (y)" : tr_loss_y,
                     "val_loss (d)": val_loss_d,
                     "val_loss (y)": val_loss_y,
+                    "te_mae_loss" : te_mae_loss_d + te_mae_loss_y,
                     "te_mae_loss (d)" : te_mae_loss_d,
                     "te_mae_loss (y)" : te_mae_loss_y,
                     "te_rmse_loss (d)" : te_rmse_loss_d,
