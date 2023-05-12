@@ -11,7 +11,7 @@ import tabulate
 
 import utils, models, ml_algorithm
 import wandb
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, ConcatDataset
 
 # import warnings
 # warnings.filterwarnings('ignore')
@@ -97,9 +97,9 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--date_cutoff",
-    type=int, default=2,
-    help="Cluster Date cutoff threshold (Default : 2)"
+    "--eval_date",
+    type=int, default=2, choices=[1, 2, 3, 4, 5],
+    help="Cluster Date evaluation date (Default : 2)"
 )
 
 parser.add_argument("--disable_embedding", action='store_true',
@@ -169,9 +169,17 @@ if args.ignore_wandb == False:
        
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
-dataset = utils.Tabledata(data, args.date_cutoff, args.scaling)
-# dataset = utils.Seqdata(data)
-train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
+tr_datasets = []; val_datasets = []; te_datasets = []; 
+for i in range(1, 6):
+    dataset = utils.Tabledata(data, i, args.scaling)
+    train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
+    tr_datasets.append(train_dataset)
+    val_datasets.append(val_dataset)
+    te_datasets.append(test_dataset)
+
+tr_dataset = ConcatDataset(tr_datasets)
+val_dataset = val_datasets[args.eval_date-1]
+print(f"Number of training Clusters : {len(tr_dataset)}")
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 te_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
@@ -239,7 +247,6 @@ columns = ["ep", "lr", f"tr_loss_d({args.criterion})", f"tr_loss_y({args.criteri
            "te_loss_d(MAE)", "te_loss_y(MAE)", "te_loss_d(RMSE)", "te_loss_y(RMSE)", "time"]
 
 best_val_loss_d = best_val_loss_y = 9999
-
 for epoch in range(1, args.epochs + 1):
     time_ep = time.time()
     lr = optimizer.param_groups[0]['lr']
@@ -295,79 +302,79 @@ for epoch in range(1, args.epochs + 1):
         te_gt_y_list += list(te_gt_y.cpu().detach().numpy())
         te_pred_d_list += list(te_pred_d.cpu().detach().numpy())
         te_gt_d_list += list(te_gt_d.cpu().detach().numpy())
-    # Calculate Epoch Loss
-    tr_loss_d = tr_epoch_loss_d / total_tr_num_data
-    tr_loss_y = tr_epoch_loss_y / total_tr_num_data
-    if args.criterion == "RMSE":
-        tr_loss_d = math.sqrt(tr_loss_d)
-        tr_loss_y = math.sqrt(tr_loss_y)
-    val_loss_d = val_epoch_loss_d / total_val_num_data
-    val_loss_y = val_epoch_loss_y / total_val_num_data
-    if args.eval_criterion == "RMSE":
-        val_loss_d = math.sqrt(val_loss_d)
-        val_loss_y = math.sqrt(val_loss_y)
-    te_mae_loss_d = te_mae_epoch_loss_d / total_te_num_data
-    te_mae_loss_y = te_mae_epoch_loss_y / total_te_num_data
-    te_rmse_loss_d = math.sqrt(te_mse_epoch_loss_d / total_te_num_data)
-    te_rmse_loss_y = math.sqrt(te_mse_epoch_loss_y / total_te_num_data)
-    time_ep = time.time() - time_ep
+        # Calculate Epoch Loss
+        tr_loss_d = tr_epoch_loss_d / total_tr_num_data
+        tr_loss_y = tr_epoch_loss_y / total_tr_num_data
+        if args.criterion == "RMSE":
+            tr_loss_d = math.sqrt(tr_loss_d)
+            tr_loss_y = math.sqrt(tr_loss_y)
+        val_loss_d = val_epoch_loss_d / total_val_num_data
+        val_loss_y = val_epoch_loss_y / total_val_num_data
+        if args.eval_criterion == "RMSE":
+            val_loss_d = math.sqrt(val_loss_d)
+            val_loss_y = math.sqrt(val_loss_y)
+        te_mae_loss_d = te_mae_epoch_loss_d / total_te_num_data
+        te_mae_loss_y = te_mae_epoch_loss_y / total_te_num_data
+        te_rmse_loss_d = math.sqrt(te_mse_epoch_loss_d / total_te_num_data)
+        te_rmse_loss_y = math.sqrt(te_mse_epoch_loss_y / total_te_num_data)
+        time_ep = time.time() - time_ep
 
-    values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d, val_loss_y, te_mae_loss_d, te_mae_loss_y, te_rmse_loss_d, te_rmse_loss_y, time_ep,]
+        values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d, val_loss_y, te_mae_loss_d, te_mae_loss_y, te_rmse_loss_d, te_rmse_loss_y, time_ep,]
 
-    table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
-    if epoch % 20 == 0 or epoch == 1:
-        table = table.split("\n")
-        table = "\n".join([table[1]] + table)
-    else:
-        table = table.split("\n")[2]
-    print(table)
+        table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
+        if epoch % 20 == 0 or epoch == 1:
+            table = table.split("\n")
+            table = "\n".join([table[1]] + table)
+        else:
+            table = table.split("\n")[2]
+        print(table)
 
-    if args.scheduler == 'cos_anneal':
-        scheduler.step()
+        if args.scheduler == 'cos_anneal':
+            scheduler.step()
 
-    # Save Best Model (Early Stopping)
-    if val_loss_d + val_loss_y < best_val_loss_d + best_val_loss_y:
-        best_epoch = epoch
-        best_val_loss_d = val_loss_d
-        best_val_loss_y = val_loss_y
-        best_te_mae_loss_d = te_mae_loss_d
-        best_te_mae_loss_y = te_mae_loss_y
-        best_te_rmse_loss_d = te_rmse_loss_d
-        best_te_rmse_loss_y = te_rmse_loss_y
+        # Save Best Model (Early Stopping)
+        if val_loss_d + val_loss_y < best_val_loss_d + best_val_loss_y:
+            best_epoch = epoch
+            best_val_loss_d = val_loss_d
+            best_val_loss_y = val_loss_y
+            best_te_mae_loss_d = te_mae_loss_d
+            best_te_mae_loss_y = te_mae_loss_y
+            best_te_rmse_loss_d = te_rmse_loss_d
+            best_te_rmse_loss_y = te_rmse_loss_y
+            
+            # save state_dict
+            os.makedirs(args.save_path, exist_ok=True)
+            utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt",
+                                epoch = epoch,
+                                state_dict = model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                )
+            if args.save_pred:
+                # save prediction and ground truth as csv
+                val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
+                                'val_ground_truth_y':val_gt_y_list,
+                                'val_pred_d' : val_pred_d_list,
+                                'val_ground_truth_d' : val_gt_d_list})
+                val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val_pred.csv", index=False)
+
+                te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
+                                'te_ground_truth_y':te_gt_y_list,
+                                'te_pred_d' : te_pred_d_list,
+                                'te_ground_truth_d' : te_gt_d_list})                
+                te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv", index=False)
+            
         
-        # save state_dict
-        os.makedirs(args.save_path, exist_ok=True)
-        utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt",
-                            epoch = epoch,
-                            state_dict = model.state_dict(),
-                            optimizer = optimizer.state_dict(),
-                            )
-        if args.save_pred:
-            # save prediction and ground truth as csv
-            val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
-                            'val_ground_truth_y':val_gt_y_list,
-                            'val_pred_d' : val_pred_d_list,
-                            'val_ground_truth_d' : val_gt_d_list})
-            val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val_pred.csv")
-
-            te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
-                            'te_ground_truth_y':te_gt_y_list,
-                            'te_pred_d' : te_pred_d_list,
-                            'te_ground_truth_d' : te_gt_d_list})                
-            te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv")
-        
-    
-    if not args.ignore_wandb:
-        wandb.log({"lr" : lr,
-                "tr_loss (d)" : tr_loss_d,
-                "tr_loss (y)" : tr_loss_y,
-                "val_loss (d)": val_loss_d,
-                "val_loss (y)": val_loss_y,
-                "te_mae_loss (d)" : te_mae_loss_d,
-                "te_mae_loss (y)" : te_mae_loss_y,
-                "te_rmse_loss (d)" : te_rmse_loss_d,
-                "te_rmse_loss (y)" : te_rmse_loss_y,
-                })
+        if not args.ignore_wandb:
+            wandb.log({"lr" : lr,
+                    "tr_loss (d)" : tr_loss_d,
+                    "tr_loss (y)" : tr_loss_y,
+                    "val_loss (d)": val_loss_d,
+                    "val_loss (y)": val_loss_y,
+                    "te_mae_loss (d)" : te_mae_loss_d,
+                    "te_mae_loss (y)" : te_mae_loss_y,
+                    "te_rmse_loss (d)" : te_rmse_loss_d,
+                    "te_rmse_loss (y)" : te_rmse_loss_y,
+                    })
 # ---------------------------------------------------------------------------------------------
 
 

@@ -15,17 +15,17 @@ class MLPRegressor(nn.Module):
         super().__init__()
         if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(128, disable_embedding = disable_embedding)
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding)
         self.fc1 = nn.Linear(input_size, hidden_size, bias=True)
-        self.fc2 = nn.Linear(hidden_size, output_size, bias=True)
-        # self.fc3 = nn.Linear(hidden_size, output_size, bias=True)
+        self.fc2 = nn.Linear(hidden_size, hidden_size, bias=True)
+        self.fc3 = nn.Linear(hidden_size, output_size, bias=True)
         self.drop_out = nn.Dropout(drop_out)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):
         x = self.embedding(cont_p, cont_c, cat_p, cat_c, len)
         x = F.relu(self.fc1(x))
         x = self.drop_out(F.relu(self.fc2(x)))
-        # x = F.relu(self.fc3(x))
+        x = self.fc3(x)
         return x
 
 class LinearRegression(torch.nn.Module):
@@ -33,7 +33,7 @@ class LinearRegression(torch.nn.Module):
         super().__init__()
         if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(128, disable_embedding = disable_embedding)
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding)
         self.linear1 = torch.nn.Linear(input_size, out_channels)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):

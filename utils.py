@@ -29,31 +29,41 @@ class Tabledata(Dataset):
                 minmax_col(data, c)
             elif scale =='normalization':
                 meanvar_col(data, c)
+        data = data.sort_values(by=['cluster', 'diff_days'], ascending=[True, True])
         min_diff_days = data.groupby('cluster')['diff_days'].min()
         data['diff_days'] = data.apply(lambda row: row['diff_days'] - min_diff_days[row['cluster']], axis=1)
         grouped = data.groupby('cluster')['diff_days'].max()
-        data['d'] = data['cluster'].map(lambda x: grouped[x] + 1)
-        data = data.sort_values(by=['cluster', 'diff_days'], ascending=[True, True])
-        data.drop(data[(data['d'] <= self.date_cutoff) | (data['diff_days'] > self.date_cutoff)].index, inplace=True)
+        data['d'] = data.apply(lambda row: grouped[row['cluster']] - row['diff_days'], axis=1)
+        for _, group_data in data.groupby('cluster'):
+            for index, row in group_data.iterrows():
+                group_data.loc[index, 'y'] = group_data[group_data['diff_days'] > row['diff_days']].shape[0]
+            data.update(group_data)
+        data['cut_date'] = data['cluster'].map(lambda x: grouped[x] + 1)
+        ## 데이터 처리 방식 ppt 기재 필요
+        data.drop(data[(data['cut_date'] < self.date_cutoff) | (data['diff_days'] >= self.date_cutoff)].index, inplace=True)
         data['cluster'] = data['cluster'].map({value: idx for idx, value in enumerate(sorted(data['cluster'].unique()))})
-        
-        if scale == 'minmax':
-            self.a_y, self.b_y = minmax_col(data,"y")
-            self.a_d, self.b_d = minmax_col(data,"d")
-        elif scale =='normalization':
-            self.a_y, self.b_y = meanvar_col(data, "y")
-            self.a_d, self.b_d = meanvar_col(data, "d")
+        # data.drop('cut_date', axis=1, inplace=True)
+        yd=[]
+        for _, group in data.groupby('cluster'):
+            yd.append(group[['y', 'd']].tail(1))
+        yd = pd.concat(yd)
 
+        if scale == 'minmax':
+            self.a_y, self.b_y = minmax_col(yd,"y")
+            self.a_d, self.b_d = minmax_col(yd,"d")
+        elif scale =='normalization':
+            self.a_y, self.b_y = meanvar_col(yd, "y")
+            self.a_d, self.b_d = meanvar_col(yd, "d")
         # Split data by type
         self.cluster = data.iloc[:,0].values.astype('float32')
         self.cont_X = data.iloc[:, 1:6].values.astype('float32')
         self.cat_X = data.iloc[:, 6:13].astype('category')
-        self.y = data.iloc[:, -2:].values.astype('float32')
+        self.y = yd.values.astype('float32')
         self.cat_cols = self.cat_X.columns
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
         self.cat_X = self.cat_X.apply(lambda x: x.cat.codes)
         self.cat_X = torch.from_numpy(self.cat_X.to_numpy()).long()
-        print(f"Number of Clusters : {len(np.unique(self.cluster))}")
+
     def __len__(self):
         return len(np.unique(self.cluster))
 
@@ -64,7 +74,7 @@ class Tabledata(Dataset):
         # 0인 tensor 복제해서 구역 할당
         cont_tensor = self.cont_tensor.clone()
         cont_tensor[:cont_X.shape[0],] = cont_X
-
+        ### self.cluster 가 마지막 dataset걸로 뒤집어 써져버림. concat한 dataset에 맞게 되게끔 해결 필요
         cat_X = self.cat_X[self.cluster == index]
         # cat_X = delete_rows_by_ratio(cat_X, self.ratio)
         cat_tensor = self.cat_tensor.clone()
@@ -73,8 +83,9 @@ class Tabledata(Dataset):
         cat_tensor_c = cat_tensor[:, 5:]
         cont_tensor_p = cont_tensor[:, :3]
         cont_tensor_c = cont_tensor[:, 3:]
-        y = torch.tensor(self.y[self.cluster == index])
-        return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y[0]
+        # import pdb;pdb.set_trace()
+        y = torch.tensor(self.y[index]) 
+        return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y
 
 # def delete_rows_by_ratio(tensor, ratio):
 #     tensor_size = tensor.size()
@@ -85,15 +96,15 @@ class Tabledata(Dataset):
     
 #     return tensor
 
-def delete_df_rows_by_ratio(df, ratio):
-    cluster_groups = df.groupby('cluster')  # 'cluster' 열을 기준으로 그룹화
+def delete_data_rows_by_ratio(data, ratio):
+    cluster_groups = data.groupby('cluster')  # 'cluster' 열을 기준으로 그룹화
     for _, group in cluster_groups:
         group_size = len(group)
         num_rows_to_delete = math.ceil(group_size * ratio)
         num_rows_to_delete = min(num_rows_to_delete, group_size - 1) # 그룹의 크기보다 크게 삭제하지 않도록 함
-        df.drop(group.tail(num_rows_to_delete).index, inplace=True)  # 뒤에서 일정 개수의 행 삭제
-    df = df.reset_index(drop=True)
-    return df
+        data.drop(group.tail(num_rows_to_delete).index, inplace=True)  # 뒤에서 일정 개수의 행 삭제
+    data = data.reset_index(drop=True)
+    return data
 
 ## MinMax Scaling Functions ------------------------------------
 def minmax_col(data, name):

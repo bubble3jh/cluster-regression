@@ -27,8 +27,10 @@ def fit(data, model, ignore_wandb, date_cutoff):
     continuous_cols = data.columns[1:6]
     scaler_x = StandardScaler()
     data[continuous_cols] = scaler_x.fit_transform(data[continuous_cols])
+    scaler_d = StandardScaler()
     scaler_y = StandardScaler()
-    data[['d','y']] = scaler_y.fit_transform(data[['d', 'y']])
+    data[['d']] = scaler_d.fit_transform(data[['d']])
+    data[['y']] = scaler_y.fit_transform(data[['y']])
     categorical_cols = data.columns[6:12]
     encoder = OneHotEncoder()
     one_hot = encoder.fit_transform(data[categorical_cols]).toarray()
@@ -60,19 +62,22 @@ def fit(data, model, ignore_wandb, date_cutoff):
     # 예측 수행
     y_pred_tr = mo_model.predict(X_train)
     y_pred = mo_model.predict(X_test)
-    y_pred_restored = scaler_y.inverse_transform(y_pred.reshape(-1, 2))
-    y_true_restored = scaler_y.inverse_transform(y_test.values.reshape(-1, 2))
+    y_pred_restored = scaler_y.inverse_transform(y_pred)[:,0]
+    y_true_restored = scaler_y.inverse_transform(y_test.values)[:,0]
+    d_pred_restored = scaler_d.inverse_transform(y_pred)[:,1]
+    d_true_restored = scaler_d.inverse_transform(y_test.values)[:,1]
+    
     # MAE, RMSE 평가 및 출력
     tr_mse = mean_squared_error(y_train, y_pred_tr)
-    mae_y = mean_absolute_error(y_true_restored[:,0], y_pred_restored[:,0])
-    rmse_y = np.sqrt(mean_squared_error(y_true_restored[:,0], y_pred_restored[:,0]))
+    mae_y = mean_absolute_error(y_true_restored, y_pred_restored)
+    rmse_y = np.sqrt(mean_squared_error(y_true_restored, y_pred_restored))
     
-    mae_d = mean_absolute_error(y_true_restored[:,1], y_pred_restored[:,1])
-    rmse_d = np.sqrt(mean_squared_error(y_true_restored[:,1], y_pred_restored[:,1]))
-    print("MAE (y): ", mae_y)
-    print("RMSE (y): ", rmse_y)
+    mae_d = mean_absolute_error(d_true_restored, d_pred_restored)
+    rmse_d = np.sqrt(mean_squared_error(d_true_restored, d_pred_restored))
     print("MAE (d): ", mae_d)
+    print("MAE (y): ", mae_y)
     print("RMSE (d): ", rmse_d)    
+    print("RMSE (y): ", rmse_y)
     # 전체 데이터에 대한 예측 결과 출력
     # result = pd.DataFrame({'cluster': X.index, 'y_true': y['y'], 'y_pred': y_pred[:,0], 'd_true': y['d'], 'd_pred': y_pred[:,1]})
     if not ignore_wandb:
