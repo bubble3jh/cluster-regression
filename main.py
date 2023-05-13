@@ -182,7 +182,7 @@ tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tr
 print(f"Number of training Clusters : {len(tr_dataset)}")
 val_dataloaders=[]; test_dataloaders=[]
 # index 0 -> all dataset / index i -> i-th data cut-off
-val_dataloaders.append(ConcatDataset(val_datasets)); test_dataloaders.append(ConcatDataset(test_datasets))
+val_dataloaders.append(DataLoader(ConcatDataset(val_datasets), batch_size=args.batch_size, shuffle=False)); test_dataloaders.append(DataLoader(ConcatDataset(test_datasets), batch_size=args.batch_size, shuffle=False))
 for i in range(5):
     val_dataset = val_datasets[i]; test_dataset = test_datasets[i]
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
@@ -282,7 +282,6 @@ for epoch in range(1, args.epochs + 1):
     val_loss_d_list=[]; val_loss_y_list=[]; test_mae_d_list=[]; test_mae_y_list=[]; test_rmse_d_list=[]; test_rmse_y_list=[]
     val_output=[]; test_output=[]; times=[]
     for i in range(6):
-        import pdb;pdb.set_trace()
         for itr, data in enumerate(val_dataloaders[i]):
             val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
                                                                                 args.scaling, dataset.a_y, dataset.b_y,
@@ -335,15 +334,6 @@ for epoch in range(1, args.epochs + 1):
         values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d_list[table_idx], val_loss_y_list[table_idx], test_mae_d_list[table_idx], test_mae_y_list[table_idx], test_rmse_d_list[table_idx], test_rmse_y_list[table_idx], times[table_idx],]
 
         table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
-        if epoch % 20 == 0 or epoch == 1:
-            table = table.split("\n")
-            table = "\n".join([table[1]] + table)
-        else:
-            table = table.split("\n")[2]
-        print(table)
-
-        if args.scheduler == 'cos_anneal':
-            scheduler.step()
 
         # Save Best Model (Early Stopping)
         if val_loss_d + val_loss_y < best_val_loss_d[i] + best_val_loss_y[i]:
@@ -375,7 +365,15 @@ for epoch in range(1, args.epochs + 1):
             #                     'te_pred_d' : te_pred_d_list,
             #                     'te_ground_truth_d' : te_gt_d_list})                
             #     te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv", index=False)
-            
+    if epoch % 20 == 0 or epoch == 1:
+        table = table.split("\n")
+        table = "\n".join([table[1]] + table)
+    else:
+        table = table.split("\n")[2]
+    print(table)
+
+    if args.scheduler == 'cos_anneal':
+        scheduler.step()
         
     if not args.ignore_wandb:
         wandb_log = {
@@ -391,18 +389,18 @@ for epoch in range(1, args.epochs + 1):
         "setting/lr": lr,
     }
 
-    for i in range(1, 6):
-        wandb_log.update({
-            f"date_{i}/valid_d": val_loss_d_list[i],
-            f"date_{i}/valid_y": val_loss_y_list[i],
-            f"date_{i}/test (mae)": test_mae_d_list[i] + test_mae_y_list[i],
-            f"date_{i}/test_d (mae)": test_mae_d_list[i],
-            f"date_{i}/test_y (mae)": test_mae_y_list[i],
-            f"date_{i}/test_d (rmse)": test_rmse_d_list[i],
-            f"date_{i}/test_y (rmse)": test_rmse_y_list[i],
-        })
+        for i in range(1, 6):
+            wandb_log.update({
+                f"date_{i}/valid_d": val_loss_d_list[i],
+                f"date_{i}/valid_y": val_loss_y_list[i],
+                f"date_{i}/test (mae)": test_mae_d_list[i] + test_mae_y_list[i],
+                f"date_{i}/test_d (mae)": test_mae_d_list[i],
+                f"date_{i}/test_y (mae)": test_mae_y_list[i],
+                f"date_{i}/test_d (rmse)": test_rmse_d_list[i],
+                f"date_{i}/test_y (rmse)": test_rmse_y_list[i],
+            })
 
-    wandb.log(wandb_log)
+        wandb.log(wandb_log)
 # ---------------------------------------------------------------------------------------------
 
 
