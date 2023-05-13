@@ -169,22 +169,22 @@ if args.ignore_wandb == False:
        
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
-tr_datasets = []; val_datasets = []; te_datasets = []; 
+tr_datasets = []; val_datasets = []; test_datasets = []; 
 for i in range(1, 6):
     dataset = utils.Tabledata(data, i, args.scaling)
     train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
     tr_datasets.append(train_dataset)
     val_datasets.append(val_dataset)
-    te_datasets.append(test_dataset)
+    test_datasets.append(test_dataset)
 
 tr_dataset = ConcatDataset(tr_datasets)
 print(f"Number of training Clusters : {len(tr_dataset)}")
 if args.eval_date != 0:
     val_dataset = val_datasets[args.eval_date-1]
-    test_dataset = te_datasets[args.eval_date-1]
+    test_dataset = test_datasets[args.eval_date-1]
 else:
     val_dataset = ConcatDataset(val_datasets)
-    test_dataset = ConcatDataset(te_datasets)
+    test_dataset = ConcatDataset(test_datasets)
 print(f"Number of evaluation Clusters : {len(val_dataset)}, {len(test_dataset)}")
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
