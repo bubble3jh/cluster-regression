@@ -29,7 +29,11 @@ parser.add_argument("--ignore_wandb", action='store_true',
 
 parser.add_argument("--save_pred", action='store_true',
         help = "Save ground truth and prediction as csv (Default : False)")
-
+parser.add_argument(
+    "--table_idx",
+    type=int, default=0, choices=[0, 1, 2, 3, 4, 5],
+    help="Cluster Date print date (Default : 2) if 0, use concated dataset"
+)
 # Data ---------------------------------------------------------
 parser.add_argument(
     "--data_path",
@@ -96,12 +100,6 @@ parser.add_argument(
     help="Dropout Rate (Default : 0)"
 )
 
-parser.add_argument(
-    "--eval_date",
-    type=int, default=2, choices=[0, 1, 2, 3, 4, 5],
-    help="Cluster Date evaluation date (Default : 2) if 0, use concated dataset"
-)
-
 parser.add_argument("--disable_embedding", action='store_true',
         help = "Disable embedding to raw data (Default : False)")
 
@@ -163,9 +161,9 @@ if args.ignore_wandb == False:
     wandb.init(entity="mlai_medical_ai", project="cluster-regression")
     wandb.config.update(args)
     if args.disable_embedding:
-        wandb.run.name = f"raw_{args.model}({args.hidden_dim})-date{args.eval_date}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
+        wandb.run.name = f"raw_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
     else:
-        wandb.run.name = f"embed_{args.model}({args.hidden_dim})-date{args.eval_date}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
+        wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
        
 ## Load Data --------------------------------------------------------------------------------
 data = pd.read_csv(args.data_path)
@@ -252,7 +250,7 @@ else:
 columns = ["ep", "lr", f"tr_loss_d({args.criterion})", f"tr_loss_y({args.criterion})", f"val_loss_d({args.eval_criterion})", f"val_loss_y({args.eval_criterion})",
            "te_loss_d(MAE)", "te_loss_y(MAE)", "te_loss_d(RMSE)", "te_loss_y(RMSE)", "time"]
 ## print table index, 0=cocnated data
-table_idx=0; best_epochs=[0, 0, 0, 0, 0, 0]
+best_epochs=[0, 0, 0, 0, 0, 0]
 best_val_loss_d = best_val_loss_y = [9999, 9999, 9999, 9999, 9999, 9999]
 best_test_losses = [[9999, 9999, 9999, 9999,],[9999, 9999, 9999, 9999,],[9999, 9999, 9999, 9999,],[9999, 9999, 9999, 9999,],[9999, 9999, 9999, 9999,],[9999, 9999, 9999, 9999,]]
 for epoch in range(1, args.epochs + 1):
@@ -331,7 +329,7 @@ for epoch in range(1, args.epochs + 1):
         test_mae_d_list.append(te_mae_loss_d); test_mae_y_list.append(te_mae_loss_y); test_rmse_d_list.append(te_rmse_loss_d); test_rmse_y_list.append(te_rmse_loss_y)
         time_ep = time.time() - time_ep; times.append(time_ep); time_ep=time.time()
 
-        values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d_list[table_idx], val_loss_y_list[table_idx], test_mae_d_list[table_idx], test_mae_y_list[table_idx], test_rmse_d_list[table_idx], test_rmse_y_list[table_idx], times[table_idx],]
+        values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d_list[args.table_idx], val_loss_y_list[args.table_idx], test_mae_d_list[args.table_idx], test_mae_y_list[args.table_idx], test_rmse_d_list[args.table_idx], test_rmse_y_list[args.table_idx], times[args.table_idx],]
 
         table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
 
@@ -385,7 +383,7 @@ for epoch in range(1, args.epochs + 1):
         "total/test_d (mae)": test_mae_d_list[0],
         "total/test_y (mae)": test_mae_y_list[0],
         "total/test_d (rmse)": test_rmse_d_list[0],
-        "total/tets_y (rmse)": test_rmse_y_list[0],
+        "total/test_y (rmse)": test_rmse_y_list[0],
         "setting/lr": lr,
     }
 
@@ -406,7 +404,7 @@ for epoch in range(1, args.epochs + 1):
 
 
 ## Print Best Model ---------------------------------------------------------------------------
-print(f"Best {args.model} achieved [d:{best_test_losses[table_idx][0]}, y:{best_test_losses[table_idx][1]}] on {best_epoch} epoch!!")
+print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")
 print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt'!!")
 if args.ignore_wandb == False:
     for i in range(6):

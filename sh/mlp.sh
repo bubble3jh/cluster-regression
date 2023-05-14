@@ -11,7 +11,7 @@ for hidden_dim in 128
 do
 for num_features in 128
 do
-CUDA_VISIBLE_DEVICES=4 "/mlainas/teang1995/anaconda3/envs/cluster/bin/python3" main.py --model=mlp --hidden_dim=${hidden_dim} --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=${drop_out} --eval_date 0
+CUDA_VISIBLE_DEVICES=1 "/mlainas/teang1995/anaconda3/envs/cluster/bin/python3" main.py --model=mlp --hidden_dim=${hidden_dim} --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=${drop_out}
 done
 done
 done
