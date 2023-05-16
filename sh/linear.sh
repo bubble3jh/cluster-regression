@@ -3,7 +3,7 @@
 ## Cos Anneal
 for lr_init in 1e-2 1e-3 1e-4
 do
-for wd in 1e-3 5e-4 1e-4 5e-5 1e-5
+for wd in 1e-3 1e-4 1e-5
 do
 for num_features in 128
 do

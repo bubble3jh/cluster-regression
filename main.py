@@ -38,7 +38,7 @@ parser.add_argument(
 parser.add_argument(
     "--data_path",
     type=str,
-    default='./data/data_final_mod.csv',
+    default='./data/',
     help="path to datasets location",)
 
 # parser.add_argument("--tr_ratio", type=float, default=0.7,
@@ -172,27 +172,27 @@ if args.ignore_wandb == False:
         wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
        
 ## Load Data --------------------------------------------------------------------------------
-data = pd.read_csv(args.data_path)
-tr_datasets = []; val_datasets = []; test_datasets = []; 
-for i in range(1, 6):
-    dataset = utils.Tabledata(data, i, args.scaling)
+datas=[]
+
+tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
+for i in range(0, 6):
+    data = pd.read_csv(args.data_path+f"data_cut_{i}.csv")
+    dataset = utils.Tabledata(data, args.scaling)
     train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
     tr_datasets.append(train_dataset)
     val_datasets.append(val_dataset)
     test_datasets.append(test_dataset)
 
-tr_dataset = ConcatDataset(tr_datasets)
+train_dataset = tr_datasets[0]
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-print(f"Number of training Clusters : {len(tr_dataset)}")
+print(f"Number of training Clusters : {len(train_dataset)}")
 val_dataloaders=[]; test_dataloaders=[]
 # index 0 -> all dataset / index i -> i-th data cut-off
-val_dataloaders.append(DataLoader(ConcatDataset(val_datasets), batch_size=args.batch_size, shuffle=False)); test_dataloaders.append(DataLoader(ConcatDataset(test_datasets), batch_size=args.batch_size, shuffle=False))
-for i in range(5):
+for i in range(6):
     val_dataset = val_datasets[i]; test_dataset = test_datasets[i]
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
     val_dataloaders.append(val_dataloader); test_dataloaders.append(test_dataloader)
-
 print("Successfully load data!")
 #-------------------------------------------------------------------------------------
 
@@ -303,6 +303,8 @@ for epoch in range(1, args.epochs + 1):
     for i in range(6):
         ## Validation Phase ----------------------------------------------------------------------
         for itr, data in enumerate(val_dataloaders[i]):
+            
+            # import pdb;pdb.set_trace()
             val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
                                                                                 args.scaling, dataset.a_y, dataset.b_y,
                                                                                 dataset.a_d, dataset.b_d)

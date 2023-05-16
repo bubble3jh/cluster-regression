@@ -72,9 +72,12 @@ def fit(data, model, ignore_wandb, print_idx):
     else:
         X_test = X_tests[print_idx-1]
         y_test = Y_tests[print_idx-1]
-        # X_test['add_idx_8']=0
-        # X_test['add_idx_25']=0
-        # X_test['add_idx_29']=0
+        if print_idx>=1:
+            X_test['add_idx_8']=0
+        if print_idx>=4:
+            X_test['add_idx_25']=0
+        if print_idx>=5:
+            X_test['add_idx_29']=0
         X_test=X_test[['age', 'CT_R', 'CT_E', 'dis', 'danger', 'rep_idx', 'cut_date',
        'gender_0', 'gender_1', 'is_korean_0', 'is_korean_1', 'primary case_0',
        'primary case_1', 'job_idx_0', 'job_idx_1', 'job_idx_2', 'job_idx_3',

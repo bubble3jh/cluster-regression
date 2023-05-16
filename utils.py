@@ -14,40 +14,22 @@ from torch.utils.data import Dataset
 
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
-    def __init__(self, data, date_cutoff, scale='minmax'):
-        # Hyperparameters and padding tensors
-        self.date_cutoff = date_cutoff
+    def __init__(self, data, scale='minmax'):
+        # padding tensors
         self.cont_tensor = torch.zeros([124,5])
         self.cat_tensor = torch.zeros([124,7])
-        
-        # Preprocessing data
-        data=data[['cluster', 'age', 'CT_R', 'CT_E', 'dis', 'danger','gender', 'is_korean', 'primary case', 
-                   'job_idx', 'rep_idx', 'place_idx', 'add_idx', 'diff_days','y']]
-        for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
-            # minmax_col(data, c)
-            if scale == 'minmax':
-                minmax_col(data, c)
-            elif scale =='normalization':
-                meanvar_col(data, c)
-        data = data.sort_values(by=['cluster', 'diff_days'], ascending=[True, True])
-        min_diff_days = data.groupby('cluster')['diff_days'].min()
-        data['diff_days'] = data.apply(lambda row: row['diff_days'] - min_diff_days[row['cluster']], axis=1)
-        grouped = data.groupby('cluster')['diff_days'].max()
-        data['d'] = data.apply(lambda row: grouped[row['cluster']] - row['diff_days'], axis=1)
-        for _, group_data in data.groupby('cluster'):
-            for index, row in group_data.iterrows():
-                group_data.loc[index, 'y'] = group_data[group_data['diff_days'] > row['diff_days']].shape[0]
-            data.update(group_data)
-        data['cut_date'] = data['cluster'].map(lambda x: grouped[x] + 1)
-        ## 데이터 처리 방식 ppt 기재 필요
-        data.drop(data[(data['cut_date'] < self.date_cutoff) | (data['diff_days'] >= self.date_cutoff)].index, inplace=True)
-        data['cluster'] = data['cluster'].map({value: idx for idx, value in enumerate(sorted(data['cluster'].unique()))})
-        # data.drop('cut_date', axis=1, inplace=True)
         yd=[]
         for _, group in data.groupby('cluster'):
             yd.append(group[['y', 'd']].tail(1))
         yd = pd.concat(yd)
 
+        # Preprocessing data
+        for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
+            if scale == 'minmax':
+                minmax_col(data, c)
+            elif scale =='normalization':
+                meanvar_col(data, c)
+        
         if scale == 'minmax':
             self.a_y, self.b_y = minmax_col(yd,"y")
             self.a_d, self.b_d = minmax_col(yd,"d")
@@ -63,38 +45,23 @@ class Tabledata(Dataset):
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
         self.cat_X = self.cat_X.apply(lambda x: x.cat.codes)
         self.cat_X = torch.from_numpy(self.cat_X.to_numpy()).long()
-        # data.to_csv(f'data_{date_cutoff}.csv', index=False)
-        # yd.to_csv(f'yd_{date_cutoff}.csv', index=False)
     def __len__(self):
         return len(np.unique(self.cluster))
 
     def __getitem__(self, index):
         cont_X = torch.from_numpy(self.cont_X[self.cluster == index])
-        # cont_X = delete_rows_by_ratio(cont_X, self.ratio)
         data_len = cont_X.shape[0]
-        # 0인 tensor 복제해서 구역 할당
         cont_tensor = self.cont_tensor.clone()
         cont_tensor[:cont_X.shape[0],] = cont_X
         cat_X = self.cat_X[self.cluster == index]
-        # cat_X = delete_rows_by_ratio(cat_X, self.ratio)
         cat_tensor = self.cat_tensor.clone()
         cat_tensor[:cat_X.shape[0],] = cat_X
         cat_tensor_p = cat_tensor[:, :5]
         cat_tensor_c = cat_tensor[:, 5:]
         cont_tensor_p = cont_tensor[:, :3]
         cont_tensor_c = cont_tensor[:, 3:]
-        # import pdb;pdb.set_trace()
         y = torch.tensor(self.y[index]) 
         return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y
-
-# def delete_rows_by_ratio(tensor, ratio):
-#     tensor_size = tensor.size()
-    
-#     num_rows_to_delete = math.ceil(tensor_size[0] * ratio)
-#     num_rows_to_delete = min(num_rows_to_delete, tensor_size[0] - 1) # 길이가 1보다 작아지지 않도록 함
-#     tensor = tensor[:tensor_size[0] - num_rows_to_delete]
-    
-#     return tensor
 
 def delete_data_rows_by_ratio(data, ratio):
     cluster_groups = data.groupby('cluster')  # 'cluster' 열을 기준으로 그룹화
