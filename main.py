@@ -309,79 +309,79 @@ for epoch in range(1, args.epochs + 1):
         te_pred_d_list += list(te_pred_d.cpu().detach().numpy())
         te_gt_d_list += list(te_gt_d.cpu().detach().numpy())
         # Calculate Epoch Loss
-        tr_loss_d = tr_epoch_loss_d / total_tr_num_data
-        tr_loss_y = tr_epoch_loss_y / total_tr_num_data
-        if args.criterion == "RMSE":
-            tr_loss_d = math.sqrt(tr_loss_d)
-            tr_loss_y = math.sqrt(tr_loss_y)
-        val_loss_d = val_epoch_loss_d / total_val_num_data
-        val_loss_y = val_epoch_loss_y / total_val_num_data
-        if args.eval_criterion == "RMSE":
-            val_loss_d = math.sqrt(val_loss_d)
-            val_loss_y = math.sqrt(val_loss_y)
-        te_mae_loss_d = te_mae_epoch_loss_d / total_te_num_data
-        te_mae_loss_y = te_mae_epoch_loss_y / total_te_num_data
-        te_rmse_loss_d = math.sqrt(te_mse_epoch_loss_d / total_te_num_data)
-        te_rmse_loss_y = math.sqrt(te_mse_epoch_loss_y / total_te_num_data)
-        time_ep = time.time() - time_ep
+    tr_loss_d = tr_epoch_loss_d / total_tr_num_data
+    tr_loss_y = tr_epoch_loss_y / total_tr_num_data
+    if args.criterion == "RMSE":
+        tr_loss_d = math.sqrt(tr_loss_d)
+        tr_loss_y = math.sqrt(tr_loss_y)
+    val_loss_d = val_epoch_loss_d / total_val_num_data
+    val_loss_y = val_epoch_loss_y / total_val_num_data
+    if args.eval_criterion == "RMSE":
+        val_loss_d = math.sqrt(val_loss_d)
+        val_loss_y = math.sqrt(val_loss_y)
+    te_mae_loss_d = te_mae_epoch_loss_d / total_te_num_data
+    te_mae_loss_y = te_mae_epoch_loss_y / total_te_num_data
+    te_rmse_loss_d = math.sqrt(te_mse_epoch_loss_d / total_te_num_data)
+    te_rmse_loss_y = math.sqrt(te_mse_epoch_loss_y / total_te_num_data)
+    time_ep = time.time() - time_ep
 
-        values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d, val_loss_y, te_mae_loss_d, te_mae_loss_y, te_rmse_loss_d, te_rmse_loss_y, time_ep,]
+    values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d, val_loss_y, te_mae_loss_d, te_mae_loss_y, te_rmse_loss_d, te_rmse_loss_y, time_ep,]
 
-        table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
-        if epoch % 20 == 0 or epoch == 1:
-            table = table.split("\n")
-            table = "\n".join([table[1]] + table)
-        else:
-            table = table.split("\n")[2]
-        print(table)
+    table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
+    if epoch % 20 == 0 or epoch == 1:
+        table = table.split("\n")
+        table = "\n".join([table[1]] + table)
+    else:
+        table = table.split("\n")[2]
+    print(table)
 
-        if args.scheduler == 'cos_anneal':
-            scheduler.step()
+    if args.scheduler == 'cos_anneal':
+        scheduler.step()
 
-        # Save Best Model (Early Stopping)
-        if val_loss_d + val_loss_y < best_val_loss_d + best_val_loss_y:
-            best_epoch = epoch
-            best_val_loss_d = val_loss_d
-            best_val_loss_y = val_loss_y
-            best_te_mae_loss_d = te_mae_loss_d
-            best_te_mae_loss_y = te_mae_loss_y
-            best_te_rmse_loss_d = te_rmse_loss_d
-            best_te_rmse_loss_y = te_rmse_loss_y
-            
-            # save state_dict
-            os.makedirs(args.save_path, exist_ok=True)
-            utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt",
-                                epoch = epoch,
-                                state_dict = model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                )
-            if args.save_pred:
-                # save prediction and ground truth as csv
-                val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
-                                'val_ground_truth_y':val_gt_y_list,
-                                'val_pred_d' : val_pred_d_list,
-                                'val_ground_truth_d' : val_gt_d_list})
-                val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val_pred.csv", index=False)
-
-                te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
-                                'te_ground_truth_y':te_gt_y_list,
-                                'te_pred_d' : te_pred_d_list,
-                                'te_ground_truth_d' : te_gt_d_list})                
-                te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv", index=False)
-            
+    # Save Best Model (Early Stopping)
+    if val_loss_d + val_loss_y < best_val_loss_d + best_val_loss_y:
+        best_epoch = epoch
+        best_val_loss_d = val_loss_d
+        best_val_loss_y = val_loss_y
+        best_te_mae_loss_d = te_mae_loss_d
+        best_te_mae_loss_y = te_mae_loss_y
+        best_te_rmse_loss_d = te_rmse_loss_d
+        best_te_rmse_loss_y = te_rmse_loss_y
         
-        if not args.ignore_wandb:
-            wandb.log({"lr" : lr,
-                    "tr_loss (d)" : tr_loss_d,
-                    "tr_loss (y)" : tr_loss_y,
-                    "val_loss (d)": val_loss_d,
-                    "val_loss (y)": val_loss_y,
-                    "te_mae_loss" : te_mae_loss_d + te_mae_loss_y,
-                    "te_mae_loss (d)" : te_mae_loss_d,
-                    "te_mae_loss (y)" : te_mae_loss_y,
-                    "te_rmse_loss (d)" : te_rmse_loss_d,
-                    "te_rmse_loss (y)" : te_rmse_loss_y,
-                    })
+        # save state_dict
+        os.makedirs(args.save_path, exist_ok=True)
+        utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt",
+                            epoch = epoch,
+                            state_dict = model.state_dict(),
+                            optimizer = optimizer.state_dict(),
+                            )
+        if args.save_pred:
+            # save prediction and ground truth as csv
+            val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
+                            'val_ground_truth_y':val_gt_y_list,
+                            'val_pred_d' : val_pred_d_list,
+                            'val_ground_truth_d' : val_gt_d_list})
+            val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val_pred.csv", index=False)
+
+            te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
+                            'te_ground_truth_y':te_gt_y_list,
+                            'te_pred_d' : te_pred_d_list,
+                            'te_ground_truth_d' : te_gt_d_list})                
+            te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv", index=False)
+        
+    
+    if not args.ignore_wandb:
+        wandb.log({"lr" : lr,
+                "tr_loss (d)" : tr_loss_d,
+                "tr_loss (y)" : tr_loss_y,
+                "val_loss (d)": val_loss_d,
+                "val_loss (y)": val_loss_y,
+                "te_mae_loss" : te_mae_loss_d + te_mae_loss_y,
+                "te_mae_loss (d)" : te_mae_loss_d,
+                "te_mae_loss (y)" : te_mae_loss_y,
+                "te_rmse_loss (d)" : te_rmse_loss_d,
+                "te_rmse_loss (y)" : te_rmse_loss_y,
+                })
 # ---------------------------------------------------------------------------------------------
 
 
