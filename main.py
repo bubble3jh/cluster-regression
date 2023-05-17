@@ -216,7 +216,7 @@ elif args.model in ["linear", "ridge"]:
 
 elif args.model in ["svr", "rfr"]:
     args.device = torch.device("cpu")
-    ml_algorithm.fit(data, args.model, args.ignore_wandb, args.table_idx)
+    ml_algorithm.fit(args.data_path, args.model, args.ignore_wandb, cutdates_num, args.table_idx)
 
 print(f"Successfully prepare {args.model} model")
 # ---------------------------------------------------------------------------------------------
@@ -450,7 +450,7 @@ if args.ignore_wandb == False:
         wandb.run.summary[f"best_val_loss {date_key}"] = best_val_loss_d[i] + best_val_loss_y[i]
         wandb.run.summary[f"best_te_mae_loss (d) {date_key}"] = best_test_losses[i][0]
         wandb.run.summary[f"best_te_mae_loss (y) {date_key}"] = best_test_losses[i][1]
-        wandb.run.summary[f"best_te_mae_loss_{date_key}"] = best_test_losses[i][0] + best_test_losses[i][1]
+        wandb.run.summary[f"best_te_mae_loss {date_key}"] = best_test_losses[i][0] + best_test_losses[i][1]
         wandb.run.summary[f"best_te_rmse_loss (d) {date_key}"] = best_test_losses[i][2]
         wandb.run.summary[f"best_te_rmse_loss (y) {date_key}"] = best_test_losses[i][3]
         wandb.run.summary[f"best_te_rmse_loss {date_key}"] = best_test_losses[i][2] + best_test_losses[i][3]
