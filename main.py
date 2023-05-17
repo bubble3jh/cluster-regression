@@ -172,10 +172,9 @@ if args.ignore_wandb == False:
         wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
        
 ## Load Data --------------------------------------------------------------------------------
-datas=[]
-
+cutdates_num=5
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
-for i in range(0, 6):
+for i in range(0, cutdates_num+1):
     data = pd.read_csv(args.data_path+f"data_cut_{i}.csv")
     dataset = utils.Tabledata(data, args.scaling)
     train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
@@ -188,7 +187,7 @@ tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=Tr
 print(f"Number of training Clusters : {len(train_dataset)}")
 val_dataloaders=[]; test_dataloaders=[]
 # index 0 -> all dataset / index i -> i-th data cut-off
-for i in range(6):
+for i in range(cutdates_num+1):
     val_dataset = val_datasets[i]; test_dataset = test_datasets[i]
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
@@ -257,9 +256,9 @@ else:
 columns = ["ep", "lr", f"tr_loss_d({args.criterion})", f"tr_loss_y({args.criterion})", f"val_loss_d({args.eval_criterion})", f"val_loss_y({args.eval_criterion})",
            "te_loss_d(MAE)", "te_loss_y(MAE)", "te_loss_d(RMSE)", "te_loss_y(RMSE)", "time"]
 ## print table index, 0=cocnated data
-best_epochs=[0] * 6 # 6 -> len(val_dataloaders)  ####
-best_val_loss_d = best_val_loss_y = [9999] * 6
-best_test_losses = [[9999] * 4] * 6
+best_epochs=[0] * (cutdates_num+1) 
+best_val_loss_d = [9999] * (cutdates_num+1); best_val_loss_y = [9999] * (cutdates_num+1)
+best_test_losses = [[9999 for j in range(4)] for i in range(cutdates_num+1)]
 
 for epoch in range(1, args.epochs + 1):
     time_ep = time.time()
@@ -300,14 +299,13 @@ for epoch in range(1, args.epochs + 1):
     val_output=[]; test_output=[]
     val_loss_d_list = []; val_loss_y_list = []
     test_mae_d_list = []; test_mae_y_list = [] ;test_rmse_d_list = []; test_rmse_y_list = []
-    for i in range(6):
+    for i in range(cutdates_num+1):
         ## Validation Phase ----------------------------------------------------------------------
         for itr, data in enumerate(val_dataloaders[i]):
             
-            # import pdb;pdb.set_trace()
             val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
-                                                                                args.scaling, dataset.a_y, dataset.b_y,
-                                                                                dataset.a_d, dataset.b_d)
+                                                                                args.scaling, val_datasets[i].dataset.a_y, val_datasets[i].dataset.b_y,
+                                                                                val_datasets[i].dataset.a_d, val_datasets[i].dataset.b_d)
             val_epoch_loss_d += val_batch_loss_d
             val_epoch_loss_y += val_batch_loss_y
             concat_val_num_data += val_num_data
@@ -332,8 +330,8 @@ for epoch in range(1, args.epochs + 1):
         ## Test Phase ----------------------------------------------------------------------
         for itr, data in enumerate(test_dataloaders[i]):
             te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth = utils.test(data, model,
-                                                                                args.scaling, dataset.a_y, dataset.b_y,
-                                                                                dataset.a_d, dataset.b_d)
+                                                                                args.scaling, test_datasets[i].dataset.a_y, test_datasets[i].dataset.b_y,
+                                                                                test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d)
             te_mae_epoch_loss_d += te_mae_batch_loss_d
             te_mae_epoch_loss_y += te_mae_batch_loss_y
             te_mse_epoch_loss_d += te_mse_batch_loss_d
@@ -341,7 +339,7 @@ for epoch in range(1, args.epochs + 1):
             concat_te_num_data += te_num_data
 
             # Restore Prediction and Ground Truth
-            te_pred_y, te_pred_d, te_gt_y, te_gt_d= utils.reverse_scaling(args.scaling, te_predicted, te_ground_truth, dataset.a_y, dataset.b_y, dataset.a_d, dataset.b_d)
+            te_pred_y, te_pred_d, te_gt_y, te_gt_d= utils.reverse_scaling(args.scaling, te_predicted, te_ground_truth, test_datasets[i].dataset.a_y, test_datasets[i].dataset.b_y, test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d)
 
             te_pred_y_list += list(te_pred_y.cpu().detach().numpy())
             te_gt_y_list += list(te_gt_y.cpu().detach().numpy())
@@ -363,7 +361,6 @@ for epoch in range(1, args.epochs + 1):
         # Save Best Model (Early Stopping)
         if val_loss_d + val_loss_y < best_val_loss_d[i] + best_val_loss_y[i]:
             best_epochs[i] = epoch
-
             best_val_loss_d[i] = val_loss_d
             best_val_loss_y[i] = val_loss_y
 
