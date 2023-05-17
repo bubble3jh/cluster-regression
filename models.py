@@ -4,28 +4,29 @@ import torch.nn.functional as F
 from typing import Optional
 import math
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
-from sklearn.svm import SVR
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
 import pdb
     
 
 class MLPRegressor(nn.Module):
-    def __init__(self, input_size=128, hidden_size=64, output_size=2, drop_out=0.0, disable_embedding=False):
+    def __init__(self, input_size=128, hidden_size=64, num_layers=3, output_size=2, drop_out=0.0, disable_embedding=False):
         super().__init__()
+        self.num_layers = num_layers
         if disable_embedding:
             input_size = 12
         self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding)
-        self.fc1 = nn.Linear(input_size, hidden_size, bias=True)
-        self.fc2 = nn.Linear(hidden_size, hidden_size, bias=True)
-        self.fc3 = nn.Linear(hidden_size, output_size, bias=True)
-        self.drop_out = nn.Dropout(drop_out)
-
+        self.layers = nn.ModuleList([nn.Linear(input_size, hidden_size, bias=True)])
+        for _ in range(num_layers - 2):
+            self.layers.append(nn.Linear(hidden_size, hidden_size, bias=True))
+        self.layers.append(nn.Linear(hidden_size, output_size, bias=True))
+        self.dropout = nn.Dropout(drop_out)
+        
     def forward(self, cont_p, cont_c, cat_p, cat_c, len):
         x = self.embedding(cont_p, cont_c, cat_p, cat_c, len)
-        x = F.relu(self.fc1(x))
-        x = self.drop_out(F.relu(self.fc2(x)))
-        x = self.fc3(x)
+        for i, layer in enumerate(self.layers):
+            if i == self.num_layers - 1:
+                x = layer(x)  # No ReLU for the last layer
+            else:
+                x = self.dropout(F.relu(layer(x)))
         return x
 
 class LinearRegression(torch.nn.Module):
