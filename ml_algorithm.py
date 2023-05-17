@@ -10,7 +10,6 @@ import utils
 import wandb
 import sys
 
-# 데이터프레임 불러오기
 def fit(data_path, model, ignore_wandb, cutdates_num, print_idx):
     datasets=[]; sclaers = {}
     for i in range(cutdates_num+1):
@@ -35,49 +34,18 @@ def fit(data_path, model, ignore_wandb, cutdates_num, print_idx):
         meancut_data = data.groupby('cluster').mean().reset_index()
 
         datasets.append(meancut_data)
-    # import pdb;pdb.set_trace()
+        
     X_trains = []; X_tests = []; Y_trains =[]; Y_tests=[]
     for dataset in datasets:
         X = dataset.drop(['y', 'd','cluster', 'diff_days'], axis=1) 
         y = dataset[['y','d']]
         X_train, X_test, Y_train, Y_test = train_test_split(X, y, test_size=0.2)
         X_trains.append(X_train); X_tests.append(X_test); Y_trains.append(Y_train); Y_tests.append(Y_test)
-    X_trainset = X_trains[0]; Y_trainset = Y_trains[0]; #X_trainset=X_trainset.fillna(0)
-    # X_testset['add_idx_8']=0
-    # import pdb;pdb.set_trace()
+    X_trainset = X_trains[0]; Y_trainset = Y_trains[0]; 
     if model == "svr":
         base = SVR()
     elif model == "rfr":
         base = RandomForestRegressor()
-    # if print_idx == 0:
-    #     X_test = X_testset
-    #     y_test = Y_testset
-    # else:
-    #     X_test = X_tests[print_idx-1]
-    #     y_test = Y_tests[print_idx-1]
-    #     if print_idx>=1:
-    #         X_test['add_idx_8']=0
-    #     if print_idx>=4:
-    #         X_test['add_idx_25']=0
-    #     if print_idx>=5:
-    #         X_test['add_idx_29']=0
-    #     X_test=X_test[['age', 'CT_R', 'CT_E', 'dis', 'danger', 'rep_idx', 'cut_date',
-    #    'gender_0', 'gender_1', 'is_korean_0', 'is_korean_1', 'primary case_0',
-    #    'primary case_1', 'job_idx_0', 'job_idx_1', 'job_idx_2', 'job_idx_3',
-    #    'job_idx_4', 'job_idx_5', 'job_idx_6', 'job_idx_7', 'job_idx_8',
-    #    'job_idx_9', 'job_idx_99', 'place_idx_1', 'place_idx_2', 'place_idx_3',
-    #    'place_idx_4', 'place_idx_5', 'place_idx_6', 'place_idx_7',
-    #    'place_idx_8', 'place_idx_9', 'place_idx_10', 'place_idx_11',
-    #    'place_idx_12', 'place_idx_13', 'place_idx_14', 'place_idx_15',
-    #    'place_idx_16', 'place_idx_17', 'place_idx_18', 'place_idx_19',
-    #    'add_idx_0', 'add_idx_1', 'add_idx_2', 'add_idx_3', 'add_idx_4',
-    #    'add_idx_5', 'add_idx_6', 'add_idx_7', 'add_idx_8', 'add_idx_9',
-    #    'add_idx_10', 'add_idx_11', 'add_idx_12', 'add_idx_13', 'add_idx_14',
-    #    'add_idx_15', 'add_idx_16', 'add_idx_17', 'add_idx_18', 'add_idx_19',
-    #    'add_idx_20', 'add_idx_21', 'add_idx_22', 'add_idx_23', 'add_idx_24',
-    #    'add_idx_25', 'add_idx_26', 'add_idx_27', 'add_idx_28', 'add_idx_29',
-    #    'add_idx_30']]
-        # import pdb;pdb.set_trace()
     mo_model = MultiOutputRegressor(base)
     mo_model.fit(X_trainset, Y_trainset)
 
@@ -90,7 +58,7 @@ def fit(data_path, model, ignore_wandb, cutdates_num, print_idx):
         y_true_restored = sclaers[f'y_{i}'].inverse_transform(Y_tests[i].values)[:,0]
         d_pred_restored = sclaers[f'd_{i}'].inverse_transform(y_pred)[:,1]
         d_true_restored = sclaers[f'd_{i}'].inverse_transform(Y_tests[i].values)[:,1]
-        # MAE, RMSE 평가 및 출력
+
         tr_mse = mean_squared_error(Y_trainset, y_pred_tr)
         mae_y = mean_absolute_error(y_true_restored, y_pred_restored)
         rmse_y = np.sqrt(mean_squared_error(y_true_restored, y_pred_restored))
@@ -102,7 +70,6 @@ def fit(data_path, model, ignore_wandb, cutdates_num, print_idx):
         
         results.append([date_key, mae_d, mae_y, rmse_d, rmse_y])
 
-        # Create a DataFrame to display the results
         columns = ["Date", "MAE (d)", "MAE (y)", "RMSE (d)", "RMSE (y)"]
         df_results = pd.DataFrame(results, columns=columns)
         if not ignore_wandb:
