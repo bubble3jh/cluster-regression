@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from typing import Optional
 import math
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from utils import reduction_cluster
 import pdb
     
 
@@ -42,10 +43,41 @@ class LinearRegression(torch.nn.Module):
         x = self.linear1(x)
         return x
 
+class Transformer(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, drop_out, disable_embedding):
+        super(Transformer, self).__init__()
+        
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="date")
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.transformer_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_size,
+            nhead=2,
+            dim_feedforward=hidden_size * 4,
+            dropout=drop_out
+        )
+        self.transformer_encoder = TransformerEncoder(self.transformer_layer, num_layers)
+        self.fc = nn.Linear(hidden_size, 2)  # arg outputsize 수정
+
+    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
+        embedded = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+        cls_token = self.cls_token.expand(embedded.size(0), -1, -1) 
+
+        mask = (torch.arange(embedded.size(1)).expand(embedded.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        mask = mask.unsqueeze(-1)
+
+        input_without_cls = embedded * mask
+        output = self.transformer_encoder(torch.cat([cls_token, input_without_cls], dim=1))  
+
+        cls_output = output[:, 0, :]  # cls 토큰의 출력
+        regression_output = self.fc(cls_output)  # 회귀 예측
+        return regression_output
+    
 class TableEmbedding(torch.nn.Module):
-    def __init__(self, output_size=128, disable_embedding=False):
+    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="mean"):
         super().__init__()
+        self.reduction = reduction
         self.disable_embedding = disable_embedding
+        self.disable_pe = disable_pe
         if not disable_embedding:
             print("Embedding applied to data")
             nn_dim = emb_hidden_dim = emb_dim_c = emb_dim_p = output_size//4
@@ -65,8 +97,9 @@ class TableEmbedding(torch.nn.Module):
         self.lookup_rep  = nn.Embedding(34, emb_dim_p).to('cuda:0')
         self.lookup_place  = nn.Embedding(19, emb_dim_c).to('cuda:0')
         self.lookup_add  = nn.Embedding(31, emb_dim_c).to('cuda:0')
+        self.positional_embedding  = nn.Embedding(5, nn_dim + emb_hidden_dim + emb_dim_c + emb_dim_p).to('cuda:0')
 
-    def forward(self, cont_p, cont_c, cat_p, cat_c, len):
+    def forward(self, cont_p, cont_c, cat_p, cat_c, len, diff_days):
         if not self.disable_embedding:
             cont_p = self.cont_p_NN(cont_p)
             cont_c = self.cont_c_NN(cont_c)
@@ -81,70 +114,6 @@ class TableEmbedding(torch.nn.Module):
         cat_p = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
         cat_c = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
         x = torch.cat((cat_p, cat_c, cont_p, cont_c), dim=2)
-        sliced_tensors = []
-        for i in range(x.shape[0]):
-            m = len[i].item()
-            sliced_tensor = x[i, :m, :]  
-            sliced_tensor = torch.mean(sliced_tensor, dim=0)
-            sliced_tensors.append(sliced_tensor)
-        x = torch.stack(sliced_tensors, dim=0)
-        return x
-
-class Transformer(nn.Module):
-    def __init__(self, ntoken: int, d_model: int, nhead: int, d_hid: int,
-                 nlayers: int, dropout: float = 0.5):
-        super().__init__()
-        self.pos_encoder = PositionalEncoding(d_model, dropout)
-        encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
-        self.encoder = nn.Embedding(ntoken, d_model)
-        self.d_model = d_model
-        self.decoder = nn.Linear(d_model, ntoken)
-
-        self.init_weights()
-
-    def init_weights(self) -> None:
-        initrange = 0.1
-        self.encoder.weight.data.uniform_(-initrange, initrange)
-        self.decoder.bias.data.zero_()
-        self.decoder.weight.data.uniform_(-initrange, initrange)
-
-    def forward(self, src: torch.Tensor, src_mask: torch.Tensor) -> torch.Tensor:
-        """
-        Arguments:
-            src: Tensor, shape ``[seq_len, batch_size]``
-            src_mask: Tensor, shape ``[seq_len, seq_len]``
-
-        Returns:
-            output Tensor of shape ``[seq_len, batch_size, ntoken]``
-        """
-        src = self.encoder(src) * math.sqrt(self.d_model)
-        # src = self.pos_encoder(src)
-        output = self.transformer_encoder(src, src_mask)
-        output = self.decoder(output)
-        return output
-
-def generate_square_subsequent_mask(sz: int) -> torch.Tensor:
-    """Generates an upper-triangular matrix of ``-inf``, with zeros on ``diag``."""
-    return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
-
-class PositionalEncoding(nn.Module):
-
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Arguments:
-            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
-        """
-        x = x + self.pe[:x.size(0)]
-        return self.dropout(x)
+        if not self.disable_pe:
+            x = x + self.positional_embedding(diff_days.int().squeeze(2))
+        return reduction_cluster(x, diff_days, len, self.reduction)

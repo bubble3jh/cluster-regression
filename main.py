@@ -32,7 +32,7 @@ parser.add_argument("--save_pred", action='store_true',
 parser.add_argument(
     "--table_idx",
     type=int, default=0, choices=[0, 1, 2, 3, 4, 5],
-    help="Cluster Date print date (Default : 2) if 0, use concated dataset"
+    help="Cluster Date print date (Default : 0) if 0, use concated dataset"
 )
 # Data ---------------------------------------------------------
 parser.add_argument(
@@ -41,14 +41,14 @@ parser.add_argument(
     default='./data/',
     help="path to datasets location",)
 
-# parser.add_argument("--tr_ratio", type=float, default=0.7,
-#           help="Ratio of train data (Default : 0.2)")
+# parser.add_argument("--tr_ratio", type=float, default=0.8,
+#           help="Ratio of train data (Default : 0.8)")
 
 # parser.add_argument("--val_ratio", type=float, default=0.1,
 #           help="Ratio of validation data (Default : 0.1)")
 
-# parser.add_argument("--te_ratio", type=float, default=0.2,
-#           help="Ratio of test data (Default : 0.2)")
+# parser.add_argument("--te_ratio", type=float, default=0.1,
+#           help="Ratio of test data (Default : 0.1)")
 
 parser.add_argument(
     "--batch_size",
@@ -198,8 +198,9 @@ print("Successfully load data!")
 
 ## Model ------------------------------------------------------------------------------------
 if args.model == 'transformer':
-    model = models.TSTransformer(hidden_size=args.hidden_dim,
-                    output_size=args.output_size).to(args.device)
+    # model = models.Transformer(d_model=128, nhead=4, d_hid=128*2,
+    #              nlayers=6, dropout = 0.5, disable_embedding=args.disable_embedding).to(args.device)
+    model = models.Transformer(input_size=args.num_features, hidden_size=args.hidden_dim, num_layers=2, drop_out=args.drop_out, disable_embedding=args.disable_embedding).to(args.device)
    
 elif args.model == "mlp":
     model = models.MLPRegressor(input_size=args.num_features,

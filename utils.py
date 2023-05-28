@@ -16,6 +16,7 @@ from torch.utils.data import Dataset
 class Tabledata(Dataset):
     def __init__(self, data, scale='minmax'):
         # padding tensors
+        self.diff_tensor = torch.zeros([124,1])
         self.cont_tensor = torch.zeros([124,5])
         self.cat_tensor = torch.zeros([124,7])
         yd=[]
@@ -40,6 +41,7 @@ class Tabledata(Dataset):
         self.cluster = data.iloc[:,0].values.astype('float32')
         self.cont_X = data.iloc[:, 1:6].values.astype('float32')
         self.cat_X = data.iloc[:, 6:13].astype('category')
+        self.diff_days = data.iloc[:, 13].values.astype('float32')
         self.y = yd.values.astype('float32')
         self.cat_cols = self.cat_X.columns
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
@@ -49,6 +51,9 @@ class Tabledata(Dataset):
         return len(np.unique(self.cluster))
 
     def __getitem__(self, index):
+        diff_days = torch.from_numpy(self.diff_days[self.cluster == index]).unsqueeze(1)
+        diff_tensor = self.diff_tensor.clone()
+        diff_tensor[:diff_days.shape[0]] = diff_days
         cont_X = torch.from_numpy(self.cont_X[self.cluster == index])
         data_len = cont_X.shape[0]
         cont_tensor = self.cont_tensor.clone()
@@ -61,17 +66,7 @@ class Tabledata(Dataset):
         cont_tensor_p = cont_tensor[:, :3]
         cont_tensor_c = cont_tensor[:, 3:]
         y = torch.tensor(self.y[index]) 
-        return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y
-
-def delete_data_rows_by_ratio(data, ratio):
-    cluster_groups = data.groupby('cluster')  # 'cluster' 열을 기준으로 그룹화
-    for _, group in cluster_groups:
-        group_size = len(group)
-        num_rows_to_delete = math.ceil(group_size * ratio)
-        num_rows_to_delete = min(num_rows_to_delete, group_size - 1) # 그룹의 크기보다 크게 삭제하지 않도록 함
-        data.drop(group.tail(num_rows_to_delete).index, inplace=True)  # 뒤에서 일정 개수의 행 삭제
-    data = data.reset_index(drop=True)
-    return data
+        return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor
 
 ## MinMax Scaling Functions ------------------------------------
 def minmax_col(data, name):
@@ -117,9 +112,13 @@ class RMSELoss(nn.Module):
 ## Train --------------------------------------------------------------------------------------
 def train(data, model, optimizer, criterion, lamb=0.0):
     model.train()
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
     optimizer.zero_grad()
-    out = model(cont_p, cont_c, cat_p, cat_c, len)
+    if model.__class__.__name__ == 'Transformer':
+        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    else:
+        out = model(cont_p, cont_c, cat_p, cat_c, len)
+        
     loss_d = criterion(out[:,0], y[:,0])
     loss_y = criterion(out[:,1], y[:,1])
     loss = loss_d + loss_y
@@ -139,8 +138,11 @@ def train(data, model, optimizer, criterion, lamb=0.0):
 @torch.no_grad()
 def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
     model.eval()
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
-    out = model(cont_p, cont_c, cat_p, cat_c, len)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
+    if model.__class__.__name__ == 'Transformer':
+        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    else:
+        out = model(cont_p, cont_c, cat_p, cat_c, len)
     
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
        
@@ -160,11 +162,13 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d):
     criterion_rmse = nn.MSELoss(reduction="sum")
     
     model.eval()
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y = data_load(data)
-    out = model(cont_p, cont_c, cat_p, cat_c, len)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
+    if model.__class__.__name__ == 'Transformer':
+        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    else:
+        out = model(cont_p, cont_c, cat_p, cat_c, len)
     
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
-    
     # MAE
     mae_y = criterion_mae(pred_y, gt_y)
     mae_d = criterion_mae(pred_d, gt_d)
@@ -180,8 +184,8 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d):
         return 0, batch_num, out, y
 
 def data_load(data):
-    cont_p,cont_c, cat_p, cat_c, len, y = data
-    return cont_p.shape[0], cont_p.cuda(), cont_c.cuda(), cat_p.cuda(), cat_c.cuda(), len.cuda(), y.cuda()
+    cont_p,cont_c, cat_p, cat_c, len, y, diff_days = data
+    return cont_p.shape[0], cont_p.cuda(), cont_c.cuda(), cat_p.cuda(), cat_c.cuda(), len.cuda(), y.cuda(), diff_days.cuda()
 
 def reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d):
     '''
@@ -230,3 +234,38 @@ def data_split_num(dataset, tr=0.8, val=0.1, te=0.1):
     test_length = len(dataset) - train_length - val_length
 
     return train_length, val_length, test_length
+
+def patient_seq_to_date_seq(non_padded_cluster, non_padded_days ):
+    days_uniq=non_padded_days.unique()
+    result = torch.zeros(days_uniq.size()[0], non_padded_cluster.shape[-1])  
+
+    for i, value in enumerate(days_uniq):
+        indices = torch.where(non_padded_days == value)[0].unsqueeze(1)
+        mean_value = torch.mean(non_padded_cluster[indices], dim=0)  
+        result[i] = mean_value
+
+    return result, days_uniq.size()[0]
+
+def reduction_cluster(x, diff_days, len, reduction):
+    cluster = []
+    for i in range(x.shape[0]):
+        pad_tensor = torch.zeros([5,128]).cuda()
+        m = len[i].item()
+        non_padded_cluster = x[i, :m, :]  
+
+        if reduction == "mean":
+            non_padded_cluster = torch.mean(non_padded_cluster, dim=0)
+
+        elif reduction == "date":
+            non_padded_days = diff_days[i, :m, :]
+            non_padded_cluster, new_len = patient_seq_to_date_seq(non_padded_cluster, non_padded_days)
+            len[i]=new_len
+            pad_tensor[:non_padded_cluster.shape[0]] = non_padded_cluster
+            non_padded_cluster=pad_tensor
+        cluster.append(non_padded_cluster)
+
+    if reduction == "mean":
+        return torch.stack(cluster, dim=0)
+    
+    elif reduction == "date":
+        return torch.stack(cluster, dim=0)
