@@ -95,6 +95,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--num_heads",
+    type=int, default=2,
+    help="Transformer model head num (default : 2)"
+)
+
+parser.add_argument(
     "--output_size",
     type=int, default=2,
     help="Output size (default : 2)"
@@ -153,7 +159,6 @@ args = parser.parse_args()
 ## ----------------------------------------------------------------------------------------------------
 
 
-
 ## Set seed and device ----------------------------------------------------------------
 utils.set_seed(args.seed)
 
@@ -198,9 +203,7 @@ print("Successfully load data!")
 
 ## Model ------------------------------------------------------------------------------------
 if args.model == 'transformer':
-    # model = models.Transformer(d_model=128, nhead=4, d_hid=128*2,
-    #              nlayers=6, dropout = 0.5, disable_embedding=args.disable_embedding).to(args.device)
-    model = models.Transformer(input_size=args.num_features, hidden_size=args.hidden_dim, num_layers=2, drop_out=args.drop_out, disable_embedding=args.disable_embedding).to(args.device)
+    model = models.Transformer(input_size=args.num_features, hidden_size=args.hidden_dim, output_size=args.output_size, num_layers=args.num_layers, num_heads=args.num_heads, drop_out=args.drop_out, disable_embedding=args.disable_embedding).to(args.device)
    
 elif args.model == "mlp":
     model = models.MLPRegressor(input_size=args.num_features,

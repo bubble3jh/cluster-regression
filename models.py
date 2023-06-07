@@ -44,19 +44,33 @@ class LinearRegression(torch.nn.Module):
         return x
 
 class Transformer(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, drop_out, disable_embedding):
+    def __init__(self, input_size, hidden_size, output_size, num_layers, num_heads, drop_out, disable_embedding):
         super(Transformer, self).__init__()
         
-        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="date")
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.embedding = TableEmbedding(output_size=hidden_size, disable_embedding = disable_embedding, disable_pe=False, reduction="date")
+        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
         self.transformer_layer = nn.TransformerEncoderLayer(
             d_model=hidden_size,
-            nhead=2,
+            nhead=num_heads,
             dim_feedforward=hidden_size * 4,
             dropout=drop_out
         )
         self.transformer_encoder = TransformerEncoder(self.transformer_layer, num_layers)
-        self.fc = nn.Linear(hidden_size, 2)  # arg outputsize 수정
+        self.fc = nn.Linear(hidden_size, output_size)  
+
+        self.init_weights()
+
+    def init_weights(self) -> None:
+        initrange = 0.1
+        for module in self.embedding.modules():
+                if isinstance(module, nn.Linear) :
+                    module.weight.data.uniform_(-initrange, initrange)
+                    if module.bias is not None:
+                        module.bias.data.zero_()
+                elif isinstance(module, nn.Embedding):
+                    module.weight.data.uniform_(-initrange, initrange)
+        self.fc.bias.data.zero_()
+        self.fc.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         embedded = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
@@ -67,9 +81,12 @@ class Transformer(nn.Module):
 
         input_without_cls = embedded * mask
         output = self.transformer_encoder(torch.cat([cls_token, input_without_cls], dim=1))  
-
+        # import pdb;pdb.set_trace()
         cls_output = output[:, 0, :]  # cls 토큰의 출력
         regression_output = self.fc(cls_output)  # 회귀 예측
+        
+        if torch.any(torch.isnan(embedded)):
+            import pdb;pdb.set_trace()
         return regression_output
     
 class TableEmbedding(torch.nn.Module):
@@ -90,19 +107,19 @@ class TableEmbedding(torch.nn.Module):
         else:
             emb_dim_p = 5
             emb_dim_c = 2
-        self.lookup_gender  = nn.Embedding(2, emb_dim_p).to('cuda:0')
-        self.lookup_korean  = nn.Embedding(2, emb_dim_p).to('cuda:0')
-        self.lookup_primary  = nn.Embedding(2, emb_dim_p).to('cuda:0')
-        self.lookup_job  = nn.Embedding(11, emb_dim_p).to('cuda:0')
-        self.lookup_rep  = nn.Embedding(34, emb_dim_p).to('cuda:0')
-        self.lookup_place  = nn.Embedding(19, emb_dim_c).to('cuda:0')
-        self.lookup_add  = nn.Embedding(31, emb_dim_c).to('cuda:0')
-        self.positional_embedding  = nn.Embedding(5, nn_dim + emb_hidden_dim + emb_dim_c + emb_dim_p).to('cuda:0')
+        self.lookup_gender  = nn.Embedding(2, emb_dim_p)
+        self.lookup_korean  = nn.Embedding(2, emb_dim_p)
+        self.lookup_primary  = nn.Embedding(2, emb_dim_p)
+        self.lookup_job  = nn.Embedding(11, emb_dim_p)
+        self.lookup_rep  = nn.Embedding(34, emb_dim_p)
+        self.lookup_place  = nn.Embedding(19, emb_dim_c)
+        self.lookup_add  = nn.Embedding(31, emb_dim_c)
+        self.positional_embedding  = nn.Embedding(5, nn_dim + emb_hidden_dim + emb_dim_c + emb_dim_p)
 
-    def forward(self, cont_p, cont_c, cat_p, cat_c, len, diff_days):
+    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         if not self.disable_embedding:
-            cont_p = self.cont_p_NN(cont_p)
-            cont_c = self.cont_c_NN(cont_c)
+            cont_p_emb = self.cont_p_NN(cont_p)
+            cont_c_emb = self.cont_c_NN(cont_c)
         a1_embs = self.lookup_gender(cat_p[:,:,0].to(torch.int))
         a2_embs = self.lookup_korean(cat_p[:,:,1].to(torch.int))
         a3_embs = self.lookup_primary(cat_p[:,:,2].to(torch.int))
@@ -111,9 +128,14 @@ class TableEmbedding(torch.nn.Module):
         a6_embs = self.lookup_place(cat_c[:,:,0].to(torch.int))
         a7_embs = self.lookup_add(cat_c[:,:,1].to(torch.int))
         # categorical datas embedding 평균
-        cat_p = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
-        cat_c = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
-        x = torch.cat((cat_p, cat_c, cont_p, cont_c), dim=2)
+        cat_p_emb = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
+        cat_c_emb = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
+        if not self.disable_embedding:
+            x = torch.cat((cat_p_emb, cat_c_emb, cont_p_emb, cont_c_emb), dim=2)
+        else:
+            x = torch.cat((cat_p_emb, cat_c_emb, cont_p, cont_c), dim=2)
+        # import pdb;pdb.set_trace()
+        # print(self.lookup_gender.weight)
         if not self.disable_pe:
             x = x + self.positional_embedding(diff_days.int().squeeze(2))
-        return reduction_cluster(x, diff_days, len, self.reduction)
+        return reduction_cluster(x, diff_days, val_len, self.reduction)

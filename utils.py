@@ -249,7 +249,7 @@ def patient_seq_to_date_seq(non_padded_cluster, non_padded_days ):
 def reduction_cluster(x, diff_days, len, reduction):
     cluster = []
     for i in range(x.shape[0]):
-        pad_tensor = torch.zeros([5,128]).cuda()
+        pad_tensor = torch.zeros([5,x.shape[-1]]).cuda()
         m = len[i].item()
         non_padded_cluster = x[i, :m, :]  
 
@@ -264,8 +264,4 @@ def reduction_cluster(x, diff_days, len, reduction):
             non_padded_cluster=pad_tensor
         cluster.append(non_padded_cluster)
 
-    if reduction == "mean":
-        return torch.stack(cluster, dim=0)
-    
-    elif reduction == "date":
-        return torch.stack(cluster, dim=0)
+    return torch.stack(cluster, dim=0)
