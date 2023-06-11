@@ -77,7 +77,7 @@ class Transformer(nn.Module):
         embedded = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
         cls_token = self.cls_token.expand(embedded.size(0), -1, -1) 
         input_with_cls = torch.cat([cls_token, embedded], dim=1)
-        mask = (torch.arange(input_with_cls.size(1)).expand(input_with_cls.size(0), -1) < val_len.unsqueeze(1)).cuda()
+        mask = (torch.arange(input_with_cls.size(1)).expand(input_with_cls.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
         output = self.transformer_encoder(input_with_cls, src_key_padding_mask=mask)  
         cls_output = output[:, 0, :]  # cls 토큰의 출력
         regression_output = self.fc(cls_output)  # 회귀 예측
