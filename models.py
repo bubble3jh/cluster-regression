@@ -52,8 +52,9 @@ class Transformer(nn.Module):
         self.transformer_layer = nn.TransformerEncoderLayer(
             d_model=hidden_size,
             nhead=num_heads,
-            dim_feedforward=hidden_size * 4,
-            dropout=drop_out
+            dim_feedforward=hidden_size, # can we edit with hyperparameter?
+            dropout=drop_out,
+            batch_first=True
         )
         self.transformer_encoder = TransformerEncoder(self.transformer_layer, num_layers)
         self.fc = nn.Linear(hidden_size, output_size)  
@@ -75,18 +76,12 @@ class Transformer(nn.Module):
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         embedded = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
         cls_token = self.cls_token.expand(embedded.size(0), -1, -1) 
-
-        mask = (torch.arange(embedded.size(1)).expand(embedded.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
-        mask = mask.unsqueeze(-1)
-
-        input_without_cls = embedded * mask
-        output = self.transformer_encoder(torch.cat([cls_token, input_without_cls], dim=1))  
-        # import pdb;pdb.set_trace()
+        input_with_cls = torch.cat([cls_token, embedded], dim=1)
+        mask = (torch.arange(input_with_cls.size(1)).expand(input_with_cls.size(0), -1) < val_len.unsqueeze(1)).cuda()
+        output = self.transformer_encoder(input_with_cls, src_key_padding_mask=mask)  
         cls_output = output[:, 0, :]  # cls 토큰의 출력
         regression_output = self.fc(cls_output)  # 회귀 예측
         
-        if torch.any(torch.isnan(embedded)):
-            import pdb;pdb.set_trace()
         return regression_output
     
 class TableEmbedding(torch.nn.Module):

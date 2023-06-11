@@ -68,9 +68,9 @@ parser.add_argument(
 # Model ---------------------------------------------------------
 parser.add_argument(
     "--model",
-    type=str, default='mlp',
+    type=str, default='transformer',
     choices=["transformer", "linear", "ridge", "mlp", "svr", "rfr"],
-    help="model name (default : mlp)")
+    help="model name (default : transformer)")
 
 parser.add_argument("--save_path",
             type=str, default="/mlainas/medical-ai/cluster-regression/exp_result/",
