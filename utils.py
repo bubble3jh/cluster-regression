@@ -114,10 +114,7 @@ def train(data, model, optimizer, criterion, lamb=0.0):
     model.train()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
     optimizer.zero_grad()
-    if model.__class__.__name__ == 'Transformer':
-        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-    else:
-        out = model(cont_p, cont_c, cat_p, cat_c, len)
+    out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
         
     loss_d = criterion(out[:,0], y[:,0])
     loss_y = criterion(out[:,1], y[:,1])
@@ -139,10 +136,7 @@ def train(data, model, optimizer, criterion, lamb=0.0):
 def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
     model.eval()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
-    if model.__class__.__name__ == 'Transformer':
-        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-    else:
-        out = model(cont_p, cont_c, cat_p, cat_c, len)
+    out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
        
@@ -163,10 +157,7 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d):
     
     model.eval()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
-    if model.__class__.__name__ == 'Transformer':
-        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-    else:
-        out = model(cont_p, cont_c, cat_p, cat_c, len)
+    out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
     # MAE

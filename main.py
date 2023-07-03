@@ -13,8 +13,8 @@ import utils, models, ml_algorithm
 import wandb
 from torch.utils.data import DataLoader, random_split, ConcatDataset
 
-# import warnings
-# warnings.filterwarnings('ignore')
+import warnings
+warnings.filterwarnings('ignore')
 
 ## Argparse ----------------------------------------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Cluster Medical-AI")
@@ -85,13 +85,19 @@ parser.add_argument(
 parser.add_argument(
     "--hidden_dim",
     type=int, default=64,
-    help="MLP model hidden size (default : 64)"
+    help="DL model hidden size (default : 64)"
+)
+
+parser.add_argument(
+    "--transformer_hidden_dim",
+    type=int, default=64,
+    help="Transformer model hidden size (default : 64)"
 )
 
 parser.add_argument(
     "--num_layers",
     type=int, default=3,
-    help="MLP model layer num (default : 3)"
+    help="DL model layer num (default : 3)"
 )
 
 parser.add_argument(
@@ -113,7 +119,7 @@ parser.add_argument(
 )
 
 parser.add_argument("--disable_embedding", action='store_true',
-        help = "Disable embedding to raw data (Default : False)")
+        help = "Disable embedding to use raw data (Default : False)")
 
 #----------------------------------------------------------------
 
@@ -162,7 +168,6 @@ args = parser.parse_args()
 ## Set seed and device ----------------------------------------------------------------
 utils.set_seed(args.seed)
 
-# args.device = torch.device("cpu")
 args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device : {args.device}")
 #-------------------------------------------------------------------------------------
@@ -203,7 +208,14 @@ print("Successfully load data!")
 
 ## Model ------------------------------------------------------------------------------------
 if args.model == 'transformer':
-    model = models.Transformer(input_size=args.num_features, hidden_size=args.hidden_dim, output_size=args.output_size, num_layers=args.num_layers, num_heads=args.num_heads, drop_out=args.drop_out, disable_embedding=args.disable_embedding).to(args.device)
+    model = models.Transformer(input_size=args.num_features, 
+                               hidden_size=args.hidden_dim, 
+                               transformer_hidden_size=args.transformer_hidden_dim, 
+                               output_size=args.output_size, 
+                               num_layers=args.num_layers, 
+                               num_heads=args.num_heads, 
+                               drop_out=args.drop_out, 
+                               disable_embedding=args.disable_embedding).to(args.device)
    
 elif args.model == "mlp":
     model = models.MLPRegressor(input_size=args.num_features,
@@ -259,7 +271,7 @@ else:
 ## Training Phase -----------------------------------------------------------------------------
 columns = ["ep", "lr", f"tr_loss_d({args.criterion})", f"tr_loss_y({args.criterion})", f"val_loss_d({args.eval_criterion})", f"val_loss_y({args.eval_criterion})",
            "te_loss_d(MAE)", "te_loss_y(MAE)", "te_loss_d(RMSE)", "te_loss_y(RMSE)", "time"]
-## print table index, 0=cocnated data
+## print table index, 0 = cocnated data
 best_epochs=[0] * (cutdates_num+1) 
 best_val_loss_d = [9999] * (cutdates_num+1); best_val_loss_y = [9999] * (cutdates_num+1)
 best_test_losses = [[9999 for j in range(4)] for i in range(cutdates_num+1)]
@@ -380,19 +392,19 @@ for epoch in range(1, args.epochs + 1):
                                 state_dict = model.state_dict(),
                                 optimizer = optimizer.state_dict(),
                                 )
-            # if args.save_pred:
-            #     # save prediction and ground truth as csv
-            #     val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
-            #                     'val_ground_truth_y':val_gt_y_list,
-            #                     'val_pred_d' : val_pred_d_list,
-            #                     'val_ground_truth_d' : val_gt_d_list})
-            #     val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val_pred.csv", index=False)
+            if args.save_pred:
+                # save prediction and ground truth as csv
+                val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
+                                'val_ground_truth_y':val_gt_y_list,
+                                'val_pred_d' : val_pred_d_list,
+                                'val_ground_truth_d' : val_gt_d_list})
+                val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val_pred.csv", index=False)
 
-            #     te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
-            #                     'te_ground_truth_y':te_gt_y_list,
-            #                     'te_pred_d' : te_pred_d_list,
-            #                     'te_ground_truth_d' : te_gt_d_list})                
-            #     te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv", index=False)
+                te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
+                                'te_ground_truth_y':te_gt_y_list,
+                                'te_pred_d' : te_pred_d_list,
+                                'te_ground_truth_d' : te_gt_d_list})                
+                te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_te_pred.csv", index=False)
 
     # print values
     values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d_list[args.table_idx], val_loss_y_list[args.table_idx], test_mae_d_list[args.table_idx], test_mae_y_list[args.table_idx], test_rmse_d_list[args.table_idx], test_rmse_y_list[args.table_idx], ]    
@@ -460,6 +472,6 @@ if args.ignore_wandb == False:
         wandb.run.summary[f"best_te_rmse_loss {date_key}"] = best_test_losses[i][2] + best_test_losses[i][3]
 
     wandb.run.summary["tr_dat_num"] = concat_tr_num_data
-    # wandb.run.summary["val_dat_num"] : concat_val_num_data
-    # wandb.run.summary["te_dat_num"] : concat_te_num_data
+    wandb.run.summary["val_dat_num"] : concat_val_num_data
+    wandb.run.summary["te_dat_num"] : concat_te_num_data
 # ---------------------------------------------------------------------------------------------
