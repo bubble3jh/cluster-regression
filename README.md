@@ -7,7 +7,7 @@ This is a machine learning code that uses coronavirus cluster data to predict ho
 For the layer that embeds each information, there are two layers: a layer that processes cluster information (e.g., severity index etc.) and a layer that processes patient information (e.g., age, address, etc.).
 For the Transformer model, we used a sequence of dates for each cluster and performed a regression using the correlation of each sequence.
 
-### 1. Project Tree
+### Project Tree
 ```
 ├── data
 │   ├── data_cut_0.csv
@@ -34,40 +34,12 @@ For the Transformer model, we used a sequence of dates for each cluster and perf
 └── README.md
 ```
 
-For our experiments, we divided the dataset according to how observable the dynamics were. For example, if we observed a cluster until day 2 and predicted the duration of the cluster and additional cases for the remaining days, we would have ``` ./data/data_cut_2.csv ```. This generated a dataset of 5 days, which we combined into ``` data_cut_0.csv ``` and used in the experiment. The data preprocessing method is documented in ```data_mod.ipynb```.
+For our experiments, we divided the dataset according to how observable the dynamics were. For example, if we observed a cluster until day 2 and predicted the duration of the cluster and additional patients for the remaining days, we would have ``` ./data/data_cut_2.csv ```. This generated a dataset of 5 days, which we combined into ``` data_cut_0.csv ``` and used in the experiment. The data preprocessing method is documented in ```data_mod.ipynb```.
 
 Also, for hyperparameter sweeping, we used files located in ```./sh ```.
 
-### 2. Model perspective
-![overall_method](https://user-images.githubusercontent.com/84635206/207836785-4983911c-f5c4-4ba1-9130-feb3515e74a2.png)
-
-In the paper, we propose Transformer with Convolution layer to handle the local context.
-
-### 3. Loss perspective
-The tranditional ERM shows worse performance on minority group.
-To alleviate this problem, we strongly minimize the training loss for group that has a small number of dataset more.
-
-#### C-REx
-C-REx compute the proportion of each group among the total dataset and add the variance regularization term with the original ERM term.
-
-#### D-REx
-D-REx apply Tukey's Ladder of Power Transformation to reduce the skewness and make the observed dataset more Gaussian-like distribution.
-Using the transformed data distribution, we measure the symmetric KL divergence between the total and each group distribution.
-Finally, D-REx add the distribution distances on the variance regularization term.
-
-#### CD-REx
-CD-REx employ regularization term of both C-REx and D-REx.
-
-
-
-## Implementation
-The script `main.py` allows to make data pickle file and train all the baselines we consider.
-
-To make pickle file of data use this:
-(In this paper, we only utilize erm data loader.)
-```
-main.py --method=erm --sampling=<SAMPLING> --small_ratio=<SMALL_RATIO> --save_pkl --exit
-```
+### Implementation
+The script `main.py` allows to train and evaluate all the baselines we consider.
 
 Parameters:
 * ```SAMPLING``` &mdash; sampling methods to treat imbalance (default: normal) :
