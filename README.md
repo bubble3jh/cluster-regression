@@ -8,7 +8,7 @@ For the layer that embeds each information, there are two layers: a layer that p
 For the Transformer model, we used a sequence of dates for each cluster and performed a regression using the correlation of each sequence.
 
 ### 1. Project Tree
-'''
+```
 ├── dir1
 │   ├── file11.ext
 │   └── file12.ext
@@ -19,7 +19,7 @@ For the Transformer model, we used a sequence of dates for each cluster and perf
 ├── dir3
 ├── file_in_root.ext
 └── README.md
-'''
+```
 
 The dataset used in this work is the MIMIC-III Waveform Database Matched Subset, provided and publicly available by PhysioNet.
 It's available to check the code for preprocessing step in  ``` ./preprocessing ```
