@@ -9,15 +9,28 @@ For the Transformer model, we used a sequence of dates for each cluster and perf
 
 ### 1. Project Tree
 ```
-├── dir1
-│   ├── file11.ext
-│   └── file12.ext
-├── dir2
-│   ├── file21.ext
-│   ├── file22.ext
-│   └── file23.ext
-├── dir3
-├── file_in_root.ext
+├── data
+│   ├── data_cut_0.csv
+│   ├── data_cut_1.csv
+│   ├── data_cut_2.csv
+│   ├── data_cut_3.csv
+│   ├── data_cut_4.csv
+│   ├── data_cut_5.csv
+│   ├── data_final_mod.csv
+│   ├── data_mod.ipynb
+│   └── data_task.csv
+├── sh
+│   ├── linear_raw.sh
+│   ├── linear.sh
+│   ├── mlp_raw.sh
+│   ├── mlp.sh
+│   ├── ridge_raw.sh
+│   ├── ridge.sh
+│   └── transformer.sh
+├── main.py
+├── ml_algorithm.py
+├── models.py
+├── utils.py
 └── README.md
 ```
 
