@@ -96,6 +96,7 @@ To train mlp model, use this:
 If you want to sweep model to search best hyperparameter, you can use this:
 
 ```bash sh/mlp.sh ```
+
 It should be modified for appropriate parameters for personal sweeping
 
 ### Evaluate Models
