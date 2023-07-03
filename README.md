@@ -88,6 +88,17 @@ Parameters:
 ----
 
 ### Train Models
-```dsadasa```
+
+To train mlp model, use this:
+
+```python3 main.py --model=mlp --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=300 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=3```
+
+If you want to sweep model to search best hyperparameter, you can use this:
+
+```bash sh/mlp.sh ```
+It should be modified for appropriate parameters for personal sweeping
+
 ### Evaluate Models
 
+To test mlp model, use this:
+```python3 main.py --model=mlp --hidden_dim=128 --num_layers=3 --eval_model=<MODEL_PATH>```
