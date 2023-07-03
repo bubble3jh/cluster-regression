@@ -34,10 +34,9 @@ For the Transformer model, we used a sequence of dates for each cluster and perf
 └── README.md
 ```
 
-The dataset used in this work is the MIMIC-III Waveform Database Matched Subset, provided and publicly available by PhysioNet.
-It's available to check the code for preprocessing step in  ``` ./preprocessing ```
+For our experiments, we divided the dataset according to how observable the dynamics were. For example, if we observed a cluster until day 2 and predicted the duration of the cluster and additional cases for the remaining days, we would have ``` ./data/data_cut_2.csv ```. This generated a dataset of 5 days, which we combined into ``` data_cut_0.csv ``` and used in the experiment. The data preprocessing method is documented in ```data_mod.ipynb```.
 
-We also suggest Time-CutMix (TC) to augment data by concatenating two sequences randomly in training phase.
+Also, for hyperparameter sweeping, we used files located in ```./sh ```.
 
 ### 2. Model perspective
 ![overall_method](https://user-images.githubusercontent.com/84635206/207836785-4983911c-f5c4-4ba1-9130-feb3515e74a2.png)
