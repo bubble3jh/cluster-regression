@@ -89,7 +89,7 @@ Parameters:
 
 ### Train Models
 
-To train mlp model, use this:
+To train mlp model for example, use this:
 
 ```python3 main.py --model=mlp --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=300 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=3```
 
