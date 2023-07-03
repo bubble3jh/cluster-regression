@@ -182,6 +182,7 @@ if args.ignore_wandb == False:
         wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
        
 ## Load Data --------------------------------------------------------------------------------
+# ./data/data_mod.ipynb 에서 기본적인 데이터 전처리
 cutdates_num=5
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
 for i in range(0, cutdates_num+1):
@@ -196,6 +197,7 @@ train_dataset = tr_datasets[0]
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 print(f"Number of training Clusters : {len(train_dataset)}")
 val_dataloaders=[]; test_dataloaders=[]
+
 # index 0 -> all dataset / index i -> i-th data cut-off
 for i in range(cutdates_num+1):
     val_dataset = val_datasets[i]; test_dataset = test_datasets[i]
