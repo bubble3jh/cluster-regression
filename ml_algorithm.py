@@ -13,7 +13,12 @@ import sys
 def fit(data_path, model, ignore_wandb, cutdates_num, print_idx):
     datasets=[]; sclaers = {}
     for i in range(cutdates_num+1):
+        ## 특정 cut off data ##
         data = pd.read_csv(data_path+f"data_cut_{i}.csv")
+
+        ## 데이터 전처리 ##
+        ## 연속 데이터 : standard scaling ##
+        ## 이산 데이터 : one-hot encoding ##
         continuous_cols = data.columns[1:6]
         sclaers[f'x_{i}'] = StandardScaler()
         data[continuous_cols] = sclaers[f'x_{i}'].fit_transform(data[continuous_cols])
@@ -27,12 +32,13 @@ def fit(data_path, model, ignore_wandb, cutdates_num, print_idx):
         data = data.drop(categorical_cols, axis=1)
         data = pd.concat([data, pd.DataFrame(one_hot, columns=encoder.get_feature_names_out(categorical_cols), index=data.index)], axis=1)
         
+        ## 정답 label data 위치 조정 ##
         y_col = data.pop('y')
         d_col = data.pop('d')
         data['y'] = y_col
         data['d'] = d_col
-        meancut_data = data.groupby('cluster').mean().reset_index()
 
+        meancut_data = data.groupby('cluster').mean().reset_index()
         datasets.append(meancut_data)
         
     X_trains = []; X_tests = []; Y_trains =[]; Y_tests=[]
@@ -53,10 +59,11 @@ def fit(data_path, model, ignore_wandb, cutdates_num, print_idx):
     results = []
     y_pred_tr = mo_model.predict(X_trainset)
     for i in range(cutdates_num+1):
-        y_pred = mo_model.predict(X_tests[i])
-        y_pred_restored = sclaers[f'y_{i}'].inverse_transform(y_pred)[:,0]
+        pred = mo_model.predict(X_tests[i])
+        y_pred_restored = sclaers[f'y_{i}'].inverse_transform(pred)[:,0]
         y_true_restored = sclaers[f'y_{i}'].inverse_transform(Y_tests[i].values)[:,0]
-        d_pred_restored = sclaers[f'd_{i}'].inverse_transform(y_pred)[:,1]
+
+        d_pred_restored = sclaers[f'd_{i}'].inverse_transform(pred)[:,1]
         d_true_restored = sclaers[f'd_{i}'].inverse_transform(Y_tests[i].values)[:,1]
 
         tr_mse = mean_squared_error(Y_trainset, y_pred_tr)
