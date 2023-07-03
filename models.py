@@ -44,15 +44,24 @@ class LinearRegression(torch.nn.Module):
         return x
 
 class Transformer(nn.Module):
-    def __init__(self, input_size, hidden_size, transformer_hidden_size, output_size, num_layers, num_heads, drop_out, disable_embedding):
+    '''
+        input_size : TableEmbedding 크기
+        hidden_size : Transformer Encoder 크기
+        output_size : y, d (2)
+        num_layers : Transformer Encoder Layer 개수
+        num_heads : Multi Head Attention Head 개수
+        drop_out : DropOut 정도
+        disable_embedding : 연속 데이터 embedding 여부
+    '''
+    def __init__(self, input_size, hidden_size, output_size, num_layers, num_heads, drop_out, disable_embedding):
         super(Transformer, self).__init__()
         
-        self.embedding = TableEmbedding(output_size=hidden_size, disable_embedding = disable_embedding, disable_pe=False, reduction="date")
-        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
+        self.embedding = TableEmbedding(output_size=input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="date")
+        self.cls_token = nn.Parameter(torch.randn(1, 1, input_size))
         self.transformer_layer = nn.TransformerEncoderLayer(
-            d_model=hidden_size,
+            d_model=input_size,
             nhead=num_heads,
-            dim_feedforward=transformer_hidden_size, 
+            dim_feedforward=hidden_size, 
             dropout=drop_out,
             batch_first=True
         )
@@ -61,6 +70,7 @@ class Transformer(nn.Module):
 
         self.init_weights()
 
+    ## Transformer Weight 초기화 방법 ##
     def init_weights(self) -> None:
         initrange = 0.1
         for module in self.embedding.modules():
@@ -85,6 +95,13 @@ class Transformer(nn.Module):
         return regression_output
     
 class TableEmbedding(torch.nn.Module):
+    '''
+        output_size : embedding output의 크기
+        disable_embedding : 연속 데이터의 임베딩 유무
+        disable_pe : transformer의 sequance 기준 positional encoding add 유무
+        reduction : "mean" : cluster 별 평균으로 reduction
+                    "date" : cluster 내 date 평균으로 reduction
+    '''
     def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="mean"):
         super().__init__()
         self.reduction = reduction

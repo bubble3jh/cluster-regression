@@ -24,25 +24,29 @@ class Tabledata(Dataset):
             yd.append(group[['y', 'd']].tail(1))
         yd = pd.concat(yd)
 
-        # Preprocessing data
+        ## 데이터 전처리 ##
+        # 연속 데이터 정규화 #
         for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
             if scale == 'minmax':
                 minmax_col(data, c)
             elif scale =='normalization':
                 meanvar_col(data, c)
         
+        # 정규화 데이터 역변환을 위한 값 저장 #
         if scale == 'minmax':
             self.a_y, self.b_y = minmax_col(yd,"y")
             self.a_d, self.b_d = minmax_col(yd,"d")
         elif scale =='normalization':
             self.a_y, self.b_y = meanvar_col(yd, "y")
             self.a_d, self.b_d = meanvar_col(yd, "d")
-        # Split data by type
+
+        ## 데이터 특성 별 분류 및 저장 ##
         self.cluster = data.iloc[:,0].values.astype('float32')
         self.cont_X = data.iloc[:, 1:6].values.astype('float32')
         self.cat_X = data.iloc[:, 6:13].astype('category')
         self.diff_days = data.iloc[:, 13].values.astype('float32')
         self.y = yd.values.astype('float32')
+        # 이산 데이터 정렬 및 저장#
         self.cat_cols = self.cat_X.columns
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
         self.cat_X = self.cat_X.apply(lambda x: x.cat.codes)
@@ -51,6 +55,16 @@ class Tabledata(Dataset):
         return len(np.unique(self.cluster))
 
     def __getitem__(self, index):
+        '''
+            [batch x padding x embedding]
+            cont_tensor_p : 패딩이 씌워진 환자 관련 연속 데이터  
+            cont_tensor_c : 패딩이 씌워진 클러스터 관련 연속 데이터  
+            cat_tensor_p : 패딩이 씌워진 환자 관련 이산 데이터  
+            cat_tensor_c : 패딩이 씌워진 클러스터 관련 이산 데이터  
+            data_len : (패딩이 아닌) 유효 환자수 반환 데이터
+            y : 정답 label
+            diff_tensor : 클러스터별 유효 날짜 반환 데이터
+        '''
         diff_days = torch.from_numpy(self.diff_days[self.cluster == index]).unsqueeze(1)
         diff_tensor = self.diff_tensor.clone()
         diff_tensor[:diff_days.shape[0]] = diff_days
@@ -243,10 +257,10 @@ def reduction_cluster(x, diff_days, len, reduction):
         pad_tensor = torch.zeros([5,x.shape[-1]]).cuda()
         m = len[i].item()
         non_padded_cluster = x[i, :m, :]  
-
+        ## 클러스터 기준 평균 ##
         if reduction == "mean":
             non_padded_cluster = torch.mean(non_padded_cluster, dim=0)
-
+        ## 클러스터 내 날짜 기준 평균 ##
         elif reduction == "date":
             non_padded_days = diff_days[i, :m, :]
             non_padded_cluster, new_len = patient_seq_to_date_seq(non_padded_cluster, non_padded_days)

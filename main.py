@@ -89,12 +89,6 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--transformer_hidden_dim",
-    type=int, default=64,
-    help="Transformer model hidden size (default : 64)"
-)
-
-parser.add_argument(
     "--num_layers",
     type=int, default=3,
     help="DL model layer num (default : 3)"
@@ -212,7 +206,6 @@ print("Successfully load data!")
 if args.model == 'transformer':
     model = models.Transformer(input_size=args.num_features, 
                                hidden_size=args.hidden_dim, 
-                               transformer_hidden_size=args.transformer_hidden_dim, 
                                output_size=args.output_size, 
                                num_layers=args.num_layers, 
                                num_heads=args.num_heads, 
