@@ -1,4 +1,4 @@
-# Robust Optimization for PPG-based Blood Pressure Estimation
+# Sequential Cluster Regression for COVID Epidemiology
 
 This repository contains PyTorch implemenations of Sequential Cluster Regression for COVID Epidemiology by Python.
 
