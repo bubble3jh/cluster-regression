@@ -21,8 +21,8 @@ parser = argparse.ArgumentParser(description="Cluster Medical-AI")
 
 parser.add_argument("--seed", type=int, default=1000, help="random seed (default: 1000)")
 
-parser.add_argument("--resume", type=str, default=None,
-    help="path to load saved model to resume training (default: None)",)
+parser.add_argument("--eval_model", type=str, default=None,
+    help="path to load saved model to evaluate model (default: None)",)
 
 parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
@@ -262,7 +262,6 @@ else:
     scheduler = None
 # ---------------------------------------------------------------------------------------------
 
-
 ## Training Phase -----------------------------------------------------------------------------
 columns = ["ep", "lr", f"tr_loss_d({args.criterion})", f"tr_loss_y({args.criterion})", f"val_loss_d({args.eval_criterion})", f"val_loss_y({args.eval_criterion})",
            "te_loss_d(MAE)", "te_loss_y(MAE)", "te_loss_d(RMSE)", "te_loss_y(RMSE)", "time"]
@@ -271,10 +270,14 @@ best_epochs=[0] * (cutdates_num+1)
 best_val_loss_d = [9999] * (cutdates_num+1); best_val_loss_y = [9999] * (cutdates_num+1)
 best_test_losses = [[9999 for j in range(4)] for i in range(cutdates_num+1)]
 
+if args.eval_model != None:
+    args.epochs = 1
+    tr_loss_d=0; tr_loss_y=0
+    model.load_state_dict(torch.load(args.eval_model)['state_dict'])
+
 for epoch in range(1, args.epochs + 1):
     time_ep = time.time()
     lr = optimizer.param_groups[0]['lr']
-
     tr_epoch_loss_d = 0; tr_epoch_loss_y = 0; val_epoch_loss_d = 0; val_epoch_loss_y = 0; te_mae_epoch_loss_d = 0; te_mae_epoch_loss_y = 0; te_mse_epoch_loss_d = 0; te_mse_epoch_loss_y = 0
 
     concat_tr_num_data = 0; concat_val_num_data = 0; concat_te_num_data = 0
@@ -285,27 +288,26 @@ for epoch in range(1, args.epochs + 1):
     tr_gt_d_list = []; val_gt_d_list = []; te_gt_d_list = []
     tr_pred_d_list = []; val_pred_d_list = []; te_pred_d_list = []
 
-    for itr, data in enumerate(tr_dataloader):
-        ## Training phase
-        tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth = utils.train(data, model, optimizer, criterion, args.lamb)
-        tr_epoch_loss_d += tr_batch_loss_d
-        tr_epoch_loss_y += tr_batch_loss_y
-        concat_tr_num_data += tr_num_data
+    if args.eval_model == None:
+        for itr, data in enumerate(tr_dataloader):
+            ## Training phase
+            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth = utils.train(data, model, optimizer, criterion, args.lamb)
+            tr_epoch_loss_d += tr_batch_loss_d
+            tr_epoch_loss_y += tr_batch_loss_y
+            concat_tr_num_data += tr_num_data
 
-        tr_pred_y_list += list(tr_predicted[:,0].cpu().detach().numpy())
-        tr_gt_y_list += list(tr_ground_truth[:,0].cpu().detach().numpy())
-        tr_pred_d_list += list(tr_predicted[:,1].cpu().detach().numpy())
-        tr_gt_d_list += list(tr_ground_truth[:,1].cpu().detach().numpy())
+            tr_pred_y_list += list(tr_predicted[:,0].cpu().detach().numpy())
+            tr_gt_y_list += list(tr_ground_truth[:,0].cpu().detach().numpy())
+            tr_pred_d_list += list(tr_predicted[:,1].cpu().detach().numpy())
+            tr_gt_d_list += list(tr_ground_truth[:,1].cpu().detach().numpy())
 
-    # Calculate Epoch loss
-    tr_loss_d = tr_epoch_loss_d / concat_tr_num_data
-    tr_loss_y = tr_epoch_loss_y / concat_tr_num_data
-    if args.criterion == "RMSE":
-        tr_loss_d = math.sqrt(tr_loss_d)
-        tr_loss_y = math.sqrt(tr_loss_y)
-    # ---------------------------------------------------------------------------------------
-
-
+        # Calculate Epoch loss
+        tr_loss_d = tr_epoch_loss_d / concat_tr_num_data
+        tr_loss_y = tr_epoch_loss_y / concat_tr_num_data
+        if args.criterion == "RMSE":
+            tr_loss_d = math.sqrt(tr_loss_d)
+            tr_loss_y = math.sqrt(tr_loss_y)
+        # ---------------------------------------------------------------------------------------
     
     val_output=[]; test_output=[]
     val_loss_d_list = []; val_loss_y_list = []
