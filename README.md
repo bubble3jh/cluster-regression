@@ -40,6 +40,15 @@ Also, for hyperparameter sweeping, we used files located in ```./sh ```.
 
 ## Implementation
 
+We used the following Python packages for core development. We tested on `Python 3.10.10`.
+```
+pytorch                   2.0.0
+pandas                    2.0.0
+numpy                     1.23.5
+scikit-learn              1.2.2
+scipy                     1.10.1
+```
+
 ### Arg Parser
 
 The script `main.py` allows to train and evaluate all the baselines we consider.
