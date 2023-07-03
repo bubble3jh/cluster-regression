@@ -9,7 +9,7 @@ for lamb in 10
 do
 for num_features in 128
 do
-CUDA_VISIBLE_DEVICES=3 "/mlainas/teang1995/anaconda3/envs/cluster/bin/python3" main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=cos_anneal --t_max=200  --lamb=${lamb} --num_features=${num_features}
+python3 main.py --model=ridge --optim=adam --lr_init=${lr_init} --wd=${wd} --epochs=200 --scheduler=cos_anneal --t_max=200  --lamb=${lamb} --num_features=${num_features}
 done
 done
 done

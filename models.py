@@ -126,7 +126,8 @@ class TableEmbedding(torch.nn.Module):
         self.lookup_rep  = nn.Embedding(34, emb_dim_p)
         self.lookup_place  = nn.Embedding(19, emb_dim_c)
         self.lookup_add  = nn.Embedding(31, emb_dim_c)
-        self.positional_embedding  = nn.Embedding(5, nn_dim + emb_hidden_dim + emb_dim_c + emb_dim_p)
+        if not disable_pe:
+            self.positional_embedding  = nn.Embedding(5, output_size)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         if not self.disable_embedding:
