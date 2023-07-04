@@ -98,17 +98,46 @@ Parameters:
 
 ### Train Models
 
-To train mlp model for example, use this:
+To train model for example, use this:
 
-```python3 main.py --model=mlp --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=300 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=3```
+```
+# linear
+python3 main.py --model=linear --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 
+
+# mlp
+python3 main.py --model=mlp --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=3
+
+# transformer
+python3 main.py --model=transformer --hidden_dim=128 --optim=adam --lr_init=1e-4 --wd=1e-3 --epochs=200 --scheduler=cos_anneal --t_max=200 --drop_out=0.1 --num_layers=2 --num_heads=2
+
+```
 
 If you want to sweep model to search best hyperparameter, you can use this:
 
-```bash sh/mlp.sh ```
+```
+# linear
+bash sh/linear.sh
+
+# mlp
+bash sh/mlp.sh 
+
+# transformer
+bash sh/transformer.sh
+
+```
 
 It should be modified for appropriate parameters for personal sweeping
 
 ### Evaluate Models
 
-To test mlp model, use this:
-```python3 main.py --model=mlp --hidden_dim=128 --num_layers=3 --eval_model=<MODEL_PATH>```
+To test model, use this:
+```
+# linear
+python3 main.py --model=linear --hidden_dim=128 --eval_model=<MODEL_PATH>
+
+# mlp
+python3 main.py --model=mlp --hidden_dim=128 --num_layers=3 --eval_model=<MODEL_PATH>
+
+# transformer
+python3 main.py --model=transformer --hidden_dim=128 --num_layers=2 --num_heads=2 --eval_model=<MODEL_PATH>
+```
