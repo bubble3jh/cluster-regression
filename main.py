@@ -176,7 +176,7 @@ if args.ignore_wandb == False:
         wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
        
 ## Load Data --------------------------------------------------------------------------------
-# ./data/data_mod.ipynb 에서 기본적인 데이터 전처리
+### ./data/data_mod.ipynb 에서 기본적인 데이터 전처리  ###
 cutdates_num=5
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
 for i in range(0, cutdates_num+1):

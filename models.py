@@ -25,7 +25,7 @@ class MLPRegressor(nn.Module):
         x = self.embedding(cont_p, cont_c, cat_p, cat_c, len, diff_days)
         for i, layer in enumerate(self.layers):
             if i == self.num_layers - 1:
-                x = layer(x)  # No ReLU for the last layer
+                x = layer(x)  
             else:
                 x = self.dropout(F.relu(layer(x)))
         return x

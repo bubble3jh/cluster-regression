@@ -61,7 +61,7 @@ class Tabledata(Dataset):
             cont_tensor_c : 패딩이 씌워진 클러스터 관련 연속 데이터  
             cat_tensor_p : 패딩이 씌워진 환자 관련 이산 데이터  
             cat_tensor_c : 패딩이 씌워진 클러스터 관련 이산 데이터  
-            data_len : (패딩이 아닌) 유효 환자수 반환 데이터
+            data_len : 클러스터별 유효 환자수 반환 데이터
             y : 정답 label
             diff_tensor : 클러스터별 유효 날짜 반환 데이터
         '''
@@ -116,7 +116,6 @@ class RMSELoss(nn.Module):
 
     def forward(self, target, pred):
         x = torch.sqrt(self.mse(target, pred) + self.eps)
-        # print(x.shape)
         return x
 # ---------------------------------------------------------------------------------------------
 
