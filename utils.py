@@ -22,6 +22,7 @@ class Tabledata(Dataset):
         yd=[]
         for _, group in data.groupby('cluster'):
             yd.append(group[['y', 'd']].tail(1))
+        import pdb;pdb.set_trace()
         yd = pd.concat(yd)
 
         ## 데이터 전처리 ##
