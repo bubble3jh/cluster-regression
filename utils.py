@@ -22,7 +22,6 @@ class Tabledata(Dataset):
         yd=[]
         for _, group in data.groupby('cluster'):
             yd.append(group[['y', 'd']].tail(1))
-        import pdb;pdb.set_trace()
         yd = pd.concat(yd)
 
         ## 데이터 전처리 ##
@@ -82,6 +81,42 @@ class Tabledata(Dataset):
         cont_tensor_c = cont_tensor[:, 3:]
         y = torch.tensor(self.y[index]) 
         return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor
+    
+
+class CEVAEdataset():
+    def __init__(self, data, scale='minmax'):
+        columns = ['cluster', 'dis', 'danger','age', 'CT_R', 'CT_E', 'gender', 'is_korean',
+           'primary case', 'job_idx', 'rep_idx', 'place_idx', 'add_idx', 'diff_days',
+           'y', 'd', 'cut_date']
+        data=data[columns]
+        yd=[]
+        for _, group in data.groupby('cluster'):
+            yd.append(group[['y', 'd']].tail(1))
+        yd = pd.concat(yd)
+
+        for c in ["age", "dis", "danger", "CT_R", "CT_E"]:
+            if scale == 'minmax':
+                minmax_col(data, c)
+            elif scale =='normalization':
+                meanvar_col(data, c)
+        
+        if scale == 'minmax':
+            self.a_y, self.b_y = minmax_col(yd,"y")
+            self.a_d, self.b_d = minmax_col(yd,"d")
+        elif scale =='normalization':
+            self.a_y, self.b_y = meanvar_col(yd, "y")
+            self.a_d, self.b_d = meanvar_col(yd, "d")
+
+        self.x=torch.tensor(data.iloc[:,2:13].values)
+        self.y=torch.tensor(data.iloc[:,14:16].values).squeeze().double() # y 한개만 사용 / 14~16 d 포함
+        t=torch.tensor(data.iloc[:,1].values)
+        self.t = torch.where(t >= t.mean(), torch.tensor(1), torch.tensor(0)).double()
+    def get_data(self):
+        return self.x, self.y, self.t
+    
+    def get_rescale(self):
+        return self.a_y, self.b_y, self.a_d, self.b_d
+        
 
 ## MinMax Scaling Functions ------------------------------------
 def minmax_col(data, name):
@@ -223,6 +258,8 @@ def set_seed(random_seed=1000):
     torch.backends.cudnn.benchmark = False
     np.random.seed(random_seed)
     random.seed(random_seed)
+    import pyro
+    pyro.set_rng_seed(random_seed)
 
 
 def save_checkpoint(file_path, epoch, **kwargs):
