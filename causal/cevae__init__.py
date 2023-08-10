@@ -565,7 +565,6 @@ class CEVAE(nn.Module):
         num_layers=3,
         num_samples=100,
     ):
-        print("using local CEVAE init")
         config = dict(
             feature_dim=feature_dim,
             latent_dim=latent_dim,
@@ -624,7 +623,7 @@ class CEVAE(nn.Module):
         self.whiten = PreWhitener(x)
 
         dataset = TensorDataset(x, t, y, d)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, generator=torch.Generator(device='cuda'))
         logger.info("Training with {} minibatches per epoch".format(len(dataloader)))
         num_steps = num_epochs * len(dataloader)
         optim = ClippedAdam(

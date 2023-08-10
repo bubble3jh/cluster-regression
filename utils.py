@@ -108,9 +108,9 @@ class CEVAEdataset():
             self.a_d, self.b_d = meanvar_col(yd, "d")
 
         self.x=torch.tensor(data.iloc[:,2:13].values)
-        self.y=torch.tensor(data.iloc[:,14:16].values).squeeze().double() # y 한개만 사용 / 14~16 d 포함
+        self.y=torch.tensor(data.iloc[:,14:16].values).squeeze() # y 한개만 사용 / 14~16 d 포함
         t=torch.tensor(data.iloc[:,1].values)
-        self.t = torch.where(t >= t.mean(), torch.tensor(1), torch.tensor(0)).double()
+        self.t = torch.where(t >= t.mean(), torch.tensor(1), torch.tensor(0))
     def get_data(self):
         return self.x, self.y, self.t
     
