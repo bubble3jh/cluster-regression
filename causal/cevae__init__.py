@@ -534,10 +534,11 @@ class Guide(PyroModule):
             # do not correspond to latent variables during training.
             t = pyro.sample("t", self.t_dist(x), obs=t, infer={"is_auxiliary": True})
             y = pyro.sample("y", self.y_dist(t, x), obs=y, infer={"is_auxiliary": True})
-            d = pyro.sample("d", self.d_dist(t, x), obs=y, infer={"is_auxiliary": True})
+            d = pyro.sample("d", self.d_dist(t, x), obs=d, infer={"is_auxiliary": True})
             # The z site participates only in the usual ELBO loss.
-            import pdb;pdb.set_trace()
+            # import pdb;pdb.set_trace()
             pyro.sample("z", self.z_dist(y, d, t, x))
+            # pyro.sample("z", self.z_dist(y, d, t, x), obs=d) # obs 있어야 list 안에서 실행댐 / d 일단 넣어놧음 의미적으로 이상. / 이거 안댐
 
     def t_dist(self, x):
         (logits,) = self.t_nn(x)
@@ -595,21 +596,12 @@ class Guide(PyroModule):
         # The first n-1 layers are identical for all t values.
         y_d_x = torch.cat([y.unsqueeze(-1), d.unsqueeze(-1), x], dim=-1)
         hidden = self.z_nn(y_d_x)
-        import pdb;pdb.set_trace()
         # In the final layer params are not shared among t values.
         # params0 = self.z0_nn(hidden)
         # params1 = self.z1_nn(hidden)
         # t = t.bool().unsqueeze(-1)
         # params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
         # return dist.Normal(*params).to_event(1)
-        # w = torch.tensor([[self.z0_nn(hidden)[0], self.z0_nn(hidden)[1]],
-        #                   [self.z1_nn(hidden)[0], self.z1_nn(hidden)[1]],
-        #                   [self.z2_nn(hidden)[0], self.z2_nn(hidden)[1]],
-        #                   [self.z3_nn(hidden)[0], self.z3_nn(hidden)[1]],
-        #                   [self.z4_nn(hidden)[0], self.z4_nn(hidden)[1]],
-        #                   [self.z5_nn(hidden)[0], self.z5_nn(hidden)[1]],
-        #                   [self.z6_nn(hidden)[0], self.z6_nn(hidden)[1]]])
-        # all_params = torch.nn.Embedding([7, 2])
         all_params = [
             self.z0_nn(hidden),
             self.z1_nn(hidden),
@@ -621,17 +613,30 @@ class Guide(PyroModule):
         ]
         # t = t.bool()
         # params = all_params[t.item()]
-        # return dist.Normal(*params).to_event(1)t = t.int()
+        # return dist.Normal(*params).to_event(1)
         t = t.int()
-        dists = [dist.Normal(*all_params[val.item()]) for val in t]
-        return dists
-        t = t.int()
-        # params = [all_params[val.item()] for val in t]
-        params = all_params[t]
-    
-        locs, scales = zip(*params)
-        return dist.Normal(torch.stack(locs), torch.stack(scales)).to_event(1)
+        # selected_params = [all_params[ti][batch_idx] for batch_idx, ti in enumerate(t)]
+        selected_locs = []
+        selected_scales = []
+        for batch_idx, ti in enumerate(t):
+            param_for_t = all_params[ti.item()]
+            selected_loc = param_for_t[0][batch_idx]
+            selected_scale = param_for_t[1][batch_idx]
+            selected_locs.append(selected_loc)
+            selected_scales.append(selected_scale)
+        
+        locs_tensor = torch.stack(selected_locs)
+        scales_tensor = torch.stack(selected_scales)
+        return dist.Normal(locs_tensor, scales_tensor).to_event(1) # Independent(Normal(loc: torch.Size([32, 20]), scale: torch.Size([32, 20])), 1)
+        # TODO : 이거 원래 z_dist에서 어떻게 나오는지 보자.
 
+        t = t.int()
+        params = [all_params[val.item()] for val in t]
+        locs, scales = zip(*params)
+        import pdb;pdb.set_trace()
+        return dist.Normal(torch.stack(locs), torch.stack(scales)).to_event(1)
+    #   TODO : 여기서 32 32 20 반환
+        return [dist.Normal(*all_params[val.item()]) for val in t]
 class TraceCausalEffect_ELBO(Trace_ELBO):
     """
     Loss function for training a :class:`CEVAE`.
