@@ -77,6 +77,22 @@ class DistributionNet(nn.Module):
         raise ValueError("dtype not supported: {}".format(dtype))
 
 
+class MultinormNet(DistributionNet):
+
+    def __init__(self, sizes, classes=7):
+        assert len(sizes) >= 1
+        super().__init__()
+        self.fc = FullyConnected(sizes + [classes])
+
+    def forward(self, x):
+        logits = self.fc(x).clamp(min=-10, max=10)
+        return (logits,)
+
+    @staticmethod
+    def make_dist(logits):
+        return dist.Categorical(logits=logits)
+
+
 class BernoulliNet(DistributionNet):
     """
     :class:`FullyConnected` network outputting a single ``logits`` value.
@@ -179,16 +195,17 @@ class NormalNet(DistributionNet):
         loc, scale = net(x)
         y = net.make_dist(loc, scale).sample()
     """
-
+    # TODO : 이거 코드 이해
     def __init__(self, sizes):
         assert len(sizes) >= 1
         super().__init__()
-        self.fc = FullyConnected(sizes + [2])
+        # self.fc = FullyConnected(sizes + [2])
+        self.fc = FullyConnected(sizes + [14])
 
     def forward(self, x):
         loc_scale = self.fc(x)
-        loc = loc_scale[..., 0].clamp(min=-1e6, max=1e6)
-        scale = nn.functional.softplus(loc_scale[..., 1]).clamp(min=1e-3, max=1e6)
+        loc = loc_scale[..., :7].clamp(min=-1e6, max=1e6)
+        scale = nn.functional.softplus(loc_scale[..., 7:]).clamp(min=1e-3, max=1e6)
         return loc, scale
 
     @staticmethod
@@ -314,6 +331,21 @@ class Model(PyroModule):
         self.y1_nn = OutcomeNet(
             [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
         )
+        self.y2_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.y3_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.y4_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.y5_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.y6_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
 
         # The d network is split between the two t values.
         self.d0_nn = OutcomeNet(
@@ -322,12 +354,29 @@ class Model(PyroModule):
         self.d1_nn = OutcomeNet(
             [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
         )
-        self.t_nn = BernoulliNet([config["latent_dim"]])
+        self.d2_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.d3_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.d4_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.d5_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.d6_nn = OutcomeNet(
+            [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
+        )
+        self.t_nn = MultinormNet([config["latent_dim"]])
+        # self.t_nn = BernoulliNet([config["latent_dim"]])
 
     def forward(self, x, t=None, y=None, d=None, size=None):
         if size is None:
             size = x.size(0)
         with pyro.plate("data", size, subsample=x):
+            # import pdb;pdb.set_trace()
             z = pyro.sample("z", self.z_dist())
             x = pyro.sample("x", self.x_dist(z), obs=x)
             t = pyro.sample("t", self.t_dist(z), obs=t)
@@ -350,31 +399,62 @@ class Model(PyroModule):
         return self.d_dist(t, z).mean
 
     def z_dist(self):
+        # return dist.Normal(0, 1).expand([self.latent_dim]).to_event(1)
         return dist.Normal(0, 1).expand([self.latent_dim]).to_event(1)
 
     def x_dist(self, z):
         loc, scale = self.x_nn(z)
         return dist.Normal(loc, scale).to_event(1)
 
-    def y_dist(self, t, z):
-        # Parameters are not shared among t values.
-        params0 = self.y0_nn(z)
-        params1 = self.y1_nn(z)
-        t = t.bool()
-        params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
-        return self.y0_nn.make_dist(*params)
+    # def y_dist(self, t, z):
+    #     # Parameters are not shared among t values.
+    #     params0 = self.y0_nn(z)
+    #     params1 = self.y1_nn(z)
+    #     t = t.bool()
+    #     params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
+    #     return self.y0_nn.make_dist(*params)
     
-    def d_dist(self, t, z):
-        # Parameters are not shared among t values.
-        params0 = self.d0_nn(z)
-        params1 = self.d1_nn(z)
-        t = t.bool()
-        params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
-        return self.d0_nn.make_dist(*params)
+    def y_dist(self, t, z):
+        # In the final layer params are not shared among t values.
+        all_params = [
+            self.y0_nn(z),
+            self.y1_nn(z),
+            self.y2_nn(z),
+            self.y3_nn(z),
+            self.y4_nn(z),
+            self.y5_nn(z),
+            self.y6_nn(z)
+        ]
+        # t = t.bool()
+        t = t.int()
+        dists = [self.y0_nn.make_dist(*all_params[val.item()]) for val in t]
+        return dists
 
+    # def d_dist(self, t, z):
+    #     # Parameters are not shared among t values.
+    #     params0 = self.d0_nn(z)
+    #     params1 = self.d1_nn(z)
+    #     t = t.bool()
+    #     params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
+    #     return self.d0_nn.make_dist(*params)
+    def d_dist(self, t, z):
+        all_params = [
+            self.d0_nn(z),
+            self.d1_nn(z),
+            self.d2_nn(z),
+            self.d3_nn(z),
+            self.d4_nn(z),
+            self.d5_nn(z),
+            self.d6_nn(z)
+        ]
+        t = t.int()
+        dists = [self.d0_nn.make_dist(*all_params[val.item()]) for val in t]
+        return dists
     def t_dist(self, z):
         (logits,) = self.t_nn(z)
-        return dist.Bernoulli(logits=logits)
+        
+        # return dist.Bernoulli(logits=logits)
+        return dist.Categorical(logits=logits)
 
 
 class Guide(PyroModule):
@@ -398,8 +478,10 @@ class Guide(PyroModule):
     def __init__(self, config):
         self.latent_dim = config["latent_dim"]
         OutcomeNet = DistributionNet.get_class(config["outcome_dist"])
+
         super().__init__()
-        self.t_nn = BernoulliNet([config["feature_dim"]])
+        # self.t_nn = BernoulliNet([config["feature_dim"]])
+        self.t_nn = MultinormNet([config["feature_dim"]])
         # The y and z networks both follow an architecture where the first few
         # layers are shared for t in {0,1}, but the final layer is split
         # between the two t values.
@@ -410,6 +492,11 @@ class Guide(PyroModule):
         )
         self.y0_nn = OutcomeNet([config["hidden_dim"]])
         self.y1_nn = OutcomeNet([config["hidden_dim"]])
+        self.y2_nn = OutcomeNet([config["hidden_dim"]])
+        self.y3_nn = OutcomeNet([config["hidden_dim"]])
+        self.y4_nn = OutcomeNet([config["hidden_dim"]])
+        self.y5_nn = OutcomeNet([config["hidden_dim"]])
+        self.y6_nn = OutcomeNet([config["hidden_dim"]])
 
         self.d_nn = FullyConnected(
             [config["feature_dim"]]
@@ -418,6 +505,11 @@ class Guide(PyroModule):
         )
         self.d0_nn = OutcomeNet([config["hidden_dim"]])
         self.d1_nn = OutcomeNet([config["hidden_dim"]])
+        self.d2_nn = OutcomeNet([config["hidden_dim"]])
+        self.d3_nn = OutcomeNet([config["hidden_dim"]])
+        self.d4_nn = OutcomeNet([config["hidden_dim"]])
+        self.d5_nn = OutcomeNet([config["hidden_dim"]])
+        self.d6_nn = OutcomeNet([config["hidden_dim"]])
 
         self.z_nn = FullyConnected(
             [2 + config["feature_dim"]]
@@ -427,6 +519,11 @@ class Guide(PyroModule):
 
         self.z0_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
         self.z1_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
+        self.z2_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
+        self.z3_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
+        self.z4_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
+        self.z5_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
+        self.z6_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
 
     def forward(self, x, t=None, y=None, d=None, size=None):
         if size is None:
@@ -439,44 +536,101 @@ class Guide(PyroModule):
             y = pyro.sample("y", self.y_dist(t, x), obs=y, infer={"is_auxiliary": True})
             d = pyro.sample("d", self.d_dist(t, x), obs=y, infer={"is_auxiliary": True})
             # The z site participates only in the usual ELBO loss.
+            import pdb;pdb.set_trace()
             pyro.sample("z", self.z_dist(y, d, t, x))
 
     def t_dist(self, x):
         (logits,) = self.t_nn(x)
-        return dist.Bernoulli(logits=logits)
+        return dist.Categorical(logits=logits)
+        # return dist.Bernoulli(logits=logits)
 
     def y_dist(self, t, x):
         # The first n-1 layers are identical for all t values.
         hidden = self.y_nn(x)
         # In the final layer params are not shared among t values.
-        params0 = self.y0_nn(hidden)
-        params1 = self.y1_nn(hidden)
-        t = t.bool()
-        params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
-        return self.y0_nn.make_dist(*params)
-    
+        all_params = [
+            self.y0_nn(hidden),
+            self.y1_nn(hidden),
+            self.y2_nn(hidden),
+            self.y3_nn(hidden),
+            self.y4_nn(hidden),
+            self.y5_nn(hidden),
+            self.y6_nn(hidden)
+        ]
+        # t = t.bool()
+        # t = t.int()
+        # params = [all_params[val.item()] for val in t]
+        # return self.y0_nn.make_dist(*params)
+        # 여기임
+        t = t.int()
+        try:
+            dists = [self.y0_nn.make_dist(*all_params[val.item()]) for val in t]
+        except:
+            import pdb;pdb.set_trace()
+        return dists
+
     def d_dist(self, t, x):
         # The first n-1 layers are identical for all t values.
         hidden = self.d_nn(x)
         # In the final layer params are not shared among t values.
-        params0 = self.d0_nn(hidden)
-        params1 = self.d1_nn(hidden)
-        t = t.bool()
-        params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
-        return self.d0_nn.make_dist(*params)
+        # params0 = self.d0_nn(hidden)
+        # params1 = self.d1_nn(hidden)
+        # t = t.bool()
+        # params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
+        all_params = [
+            self.d0_nn(hidden),
+            self.d1_nn(hidden),
+            self.d2_nn(hidden),
+            self.d3_nn(hidden),
+            self.d4_nn(hidden),
+            self.d5_nn(hidden),
+            self.d6_nn(hidden)
+        ]
+        # t = t.bool()
+        t = t.int()
+        dists = [self.d0_nn.make_dist(*all_params[val.item()]) for val in t]
+        return dists
 
     def z_dist(self, y, d, t, x):
         # The first n-1 layers are identical for all t values.
         y_d_x = torch.cat([y.unsqueeze(-1), d.unsqueeze(-1), x], dim=-1)
-        # import pdb;pdb.set_trace()
         hidden = self.z_nn(y_d_x)
+        import pdb;pdb.set_trace()
         # In the final layer params are not shared among t values.
-        params0 = self.z0_nn(hidden)
-        params1 = self.z1_nn(hidden)
-        t = t.bool().unsqueeze(-1)
-        params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
-        return dist.Normal(*params).to_event(1)
-
+        # params0 = self.z0_nn(hidden)
+        # params1 = self.z1_nn(hidden)
+        # t = t.bool().unsqueeze(-1)
+        # params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
+        # return dist.Normal(*params).to_event(1)
+        # w = torch.tensor([[self.z0_nn(hidden)[0], self.z0_nn(hidden)[1]],
+        #                   [self.z1_nn(hidden)[0], self.z1_nn(hidden)[1]],
+        #                   [self.z2_nn(hidden)[0], self.z2_nn(hidden)[1]],
+        #                   [self.z3_nn(hidden)[0], self.z3_nn(hidden)[1]],
+        #                   [self.z4_nn(hidden)[0], self.z4_nn(hidden)[1]],
+        #                   [self.z5_nn(hidden)[0], self.z5_nn(hidden)[1]],
+        #                   [self.z6_nn(hidden)[0], self.z6_nn(hidden)[1]]])
+        # all_params = torch.nn.Embedding([7, 2])
+        all_params = [
+            self.z0_nn(hidden),
+            self.z1_nn(hidden),
+            self.z2_nn(hidden),
+            self.z3_nn(hidden),
+            self.z4_nn(hidden),
+            self.z5_nn(hidden),
+            self.z6_nn(hidden)
+        ]
+        # t = t.bool()
+        # params = all_params[t.item()]
+        # return dist.Normal(*params).to_event(1)t = t.int()
+        t = t.int()
+        dists = [dist.Normal(*all_params[val.item()]) for val in t]
+        return dists
+        t = t.int()
+        # params = [all_params[val.item()] for val in t]
+        params = all_params[t]
+    
+        locs, scales = zip(*params)
+        return dist.Normal(torch.stack(locs), torch.stack(scales)).to_event(1)
 
 class TraceCausalEffect_ELBO(Trace_ELBO):
     """
@@ -499,9 +653,7 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
         loss, surrogate_loss = super()._differentiable_loss_particle(
             model_trace, blocked_guide_trace
         )
-
-        # 여기서 알아서 t,y,d log q 구해서 loss 바꿔주는중
-        # Add log q terms.
+        # Add log q terms. 
         for name in blocked_names:
             log_q = guide_trace.nodes[name]["log_prob_sum"]
             loss = loss - torch_item(log_q)
@@ -565,7 +717,6 @@ class CEVAE(nn.Module):
         num_layers=3,
         num_samples=100,
     ):
-        print("using local CEVAE init")
         config = dict(
             feature_dim=feature_dim,
             latent_dim=latent_dim,
@@ -573,6 +724,7 @@ class CEVAE(nn.Module):
             num_layers=num_layers,
             num_samples=num_samples,
         )
+        print(config)
         for name, size in config.items():
             if not (isinstance(size, int) and size > 0):
                 raise ValueError("Expected {} > 0 but got {}".format(name, size))
@@ -624,7 +776,7 @@ class CEVAE(nn.Module):
         self.whiten = PreWhitener(x)
 
         dataset = TensorDataset(x, t, y, d)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, generator=torch.Generator(device='cuda'))
         logger.info("Training with {} minibatches per epoch".format(len(dataloader)))
         num_steps = num_epochs * len(dataloader)
         optim = ClippedAdam(
@@ -679,7 +831,7 @@ class CEVAE(nn.Module):
         result = []
         for x in dataloader:
             x = self.whiten(x)
-            ## TODO : y, d 둘다 봐야함.
+            ## TODO : ite evaluation 시 y, d 둘다 봐야함.
             with pyro.plate("num_particles", num_samples, dim=-2):
                 with poutine.trace() as tr, poutine.block(hide=["y", "t"]):
                     self.guide(x)
