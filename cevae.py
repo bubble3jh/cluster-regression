@@ -20,8 +20,8 @@ import torch
 
 import pyro
 import pyro.distributions as dist
-from pyro.contrib.cevae import CEVAE, PreWhitener
-# from causal.cevae__init__ import CEVAE
+# from pyro.contrib.cevae import CEVAE, PreWhitener
+from causal.cevae__init__ import CEVAE, PreWhitener
 
 import torch
 import torch.nn as nn

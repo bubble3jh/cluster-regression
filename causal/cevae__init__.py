@@ -722,6 +722,7 @@ class CEVAE(nn.Module):
         num_layers=3,
         num_samples=100,
     ):
+        print("using local CEVAE")
         config = dict(
             feature_dim=feature_dim,
             latent_dim=latent_dim,
