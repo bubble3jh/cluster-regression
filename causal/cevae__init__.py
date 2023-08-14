@@ -26,7 +26,7 @@ import logging
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-
+from tqdm import tqdm
 import pyro
 import pyro.distributions as dist
 from pyro import poutine
@@ -646,13 +646,6 @@ class Guide(PyroModule):
         scales_tensor = torch.stack(selected_scales)
         return dist.Normal(locs_tensor, scales_tensor).to_event(1) # Independent(Normal(loc: torch.Size([32, 20]), scale: torch.Size([32, 20])), 1)
 
-        t = t.int()
-        params = [all_params[val.item()] for val in t]
-        locs, scales = zip(*params)
-        import pdb;pdb.set_trace()
-        return dist.Normal(torch.stack(locs), torch.stack(scales)).to_event(1)
-    #   TODO : 여기서 32 32 20 반환
-        return [dist.Normal(*all_params[val.item()]) for val in t]
 class TraceCausalEffect_ELBO(Trace_ELBO):
     """
     Loss function for training a :class:`CEVAE`.
@@ -810,8 +803,8 @@ class CEVAE(nn.Module):
         )
         svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO())
         losses = []
-        for epoch in range(num_epochs):
-            for x, t, y, d in dataloader:
+        for epoch in tqdm(range(num_epochs), desc="Epoch"):
+            for x, t, y, d in tqdm(dataloader, desc="Batch", leave=False):
                 x = self.whiten(x)
                 loss = svi.step(x, t, y, d, size=len(dataset)) / len(dataset)
                 # d_loss = svi.step(x, t, d, size=len(dataset)) / len(dataset)
