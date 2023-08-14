@@ -199,13 +199,13 @@ class NormalNet(DistributionNet):
     def __init__(self, sizes):
         assert len(sizes) >= 1
         super().__init__()
-        # self.fc = FullyConnected(sizes + [2])
-        self.fc = FullyConnected(sizes + [14])
+        self.fc = FullyConnected(sizes + [2])
+        # self.fc = FullyConnected(sizes + [14])
 
     def forward(self, x):
         loc_scale = self.fc(x)
-        loc = loc_scale[..., :7].clamp(min=-1e6, max=1e6)
-        scale = nn.functional.softplus(loc_scale[..., 7:]).clamp(min=1e-3, max=1e6)
+        loc = loc_scale[..., 0].clamp(min=-1e6, max=1e6)
+        scale = nn.functional.softplus(loc_scale[..., 1]).clamp(min=1e-3, max=1e6)
         return loc, scale
 
     @staticmethod
@@ -425,10 +425,19 @@ class Model(PyroModule):
             self.y5_nn(z),
             self.y6_nn(z)
         ]
-        # t = t.bool()
         t = t.int()
-        dists = [self.y0_nn.make_dist(*all_params[val.item()]) for val in t]
-        return dists
+        selected_locs = []
+        selected_scales = []
+        for batch_idx, ti in enumerate(t):
+            param_for_t = all_params[ti.item()]
+            selected_loc = param_for_t[0][batch_idx]
+            selected_scale = param_for_t[1][batch_idx]
+            selected_locs.append(selected_loc)
+            selected_scales.append(selected_scale)
+        
+        locs_tensor = torch.stack(selected_locs)
+        scales_tensor = torch.stack(selected_scales)
+        return self.y0_nn.make_dist(locs_tensor, scales_tensor)
 
     # def d_dist(self, t, z):
     #     # Parameters are not shared among t values.
@@ -448,8 +457,19 @@ class Model(PyroModule):
             self.d6_nn(z)
         ]
         t = t.int()
-        dists = [self.d0_nn.make_dist(*all_params[val.item()]) for val in t]
-        return dists
+        selected_locs = []
+        selected_scales = []
+        for batch_idx, ti in enumerate(t):
+            param_for_t = all_params[ti.item()]
+            selected_loc = param_for_t[0][batch_idx]
+            selected_scale = param_for_t[1][batch_idx]
+            selected_locs.append(selected_loc)
+            selected_scales.append(selected_scale)
+        
+        locs_tensor = torch.stack(selected_locs)
+        scales_tensor = torch.stack(selected_scales)
+        return self.d0_nn.make_dist(locs_tensor, scales_tensor)
+    
     def t_dist(self, z):
         (logits,) = self.t_nn(z)
         
@@ -536,9 +556,7 @@ class Guide(PyroModule):
             y = pyro.sample("y", self.y_dist(t, x), obs=y, infer={"is_auxiliary": True})
             d = pyro.sample("d", self.d_dist(t, x), obs=d, infer={"is_auxiliary": True})
             # The z site participates only in the usual ELBO loss.
-            # import pdb;pdb.set_trace()
             pyro.sample("z", self.z_dist(y, d, t, x))
-            # pyro.sample("z", self.z_dist(y, d, t, x), obs=d) # obs 있어야 list 안에서 실행댐 / d 일단 넣어놧음 의미적으로 이상. / 이거 안댐
 
     def t_dist(self, x):
         (logits,) = self.t_nn(x)
@@ -549,6 +567,7 @@ class Guide(PyroModule):
         # The first n-1 layers are identical for all t values.
         hidden = self.y_nn(x)
         # In the final layer params are not shared among t values.
+
         all_params = [
             self.y0_nn(hidden),
             self.y1_nn(hidden),
@@ -558,26 +577,24 @@ class Guide(PyroModule):
             self.y5_nn(hidden),
             self.y6_nn(hidden)
         ]
-        # t = t.bool()
-        # t = t.int()
-        # params = [all_params[val.item()] for val in t]
-        # return self.y0_nn.make_dist(*params)
-        # 여기임
         t = t.int()
-        try:
-            dists = [self.y0_nn.make_dist(*all_params[val.item()]) for val in t]
-        except:
-            import pdb;pdb.set_trace()
-        return dists
+        selected_locs = []
+        selected_scales = []
+        for batch_idx, ti in enumerate(t):
+            param_for_t = all_params[ti.item()]
+            selected_loc = param_for_t[0][batch_idx]
+            selected_scale = param_for_t[1][batch_idx]
+            selected_locs.append(selected_loc)
+            selected_scales.append(selected_scale)
+        
+        locs_tensor = torch.stack(selected_locs)
+        scales_tensor = torch.stack(selected_scales)
+        return self.y0_nn.make_dist(locs_tensor, scales_tensor)
 
     def d_dist(self, t, x):
         # The first n-1 layers are identical for all t values.
         hidden = self.d_nn(x)
         # In the final layer params are not shared among t values.
-        # params0 = self.d0_nn(hidden)
-        # params1 = self.d1_nn(hidden)
-        # t = t.bool()
-        # params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
         all_params = [
             self.d0_nn(hidden),
             self.d1_nn(hidden),
@@ -587,21 +604,25 @@ class Guide(PyroModule):
             self.d5_nn(hidden),
             self.d6_nn(hidden)
         ]
-        # t = t.bool()
         t = t.int()
-        dists = [self.d0_nn.make_dist(*all_params[val.item()]) for val in t]
-        return dists
+        selected_locs = []
+        selected_scales = []
+        for batch_idx, ti in enumerate(t):
+            param_for_t = all_params[ti.item()]
+            selected_loc = param_for_t[0][batch_idx]
+            selected_scale = param_for_t[1][batch_idx]
+            selected_locs.append(selected_loc)
+            selected_scales.append(selected_scale)
+        
+        locs_tensor = torch.stack(selected_locs)
+        scales_tensor = torch.stack(selected_scales)
+        return self.d0_nn.make_dist(locs_tensor, scales_tensor)
 
     def z_dist(self, y, d, t, x):
         # The first n-1 layers are identical for all t values.
         y_d_x = torch.cat([y.unsqueeze(-1), d.unsqueeze(-1), x], dim=-1)
         hidden = self.z_nn(y_d_x)
         # In the final layer params are not shared among t values.
-        # params0 = self.z0_nn(hidden)
-        # params1 = self.z1_nn(hidden)
-        # t = t.bool().unsqueeze(-1)
-        # params = [torch.where(t, p1, p0) for p0, p1 in zip(params0, params1)]
-        # return dist.Normal(*params).to_event(1)
         all_params = [
             self.z0_nn(hidden),
             self.z1_nn(hidden),
@@ -611,11 +632,7 @@ class Guide(PyroModule):
             self.z5_nn(hidden),
             self.z6_nn(hidden)
         ]
-        # t = t.bool()
-        # params = all_params[t.item()]
-        # return dist.Normal(*params).to_event(1)
         t = t.int()
-        # selected_params = [all_params[ti][batch_idx] for batch_idx, ti in enumerate(t)]
         selected_locs = []
         selected_scales = []
         for batch_idx, ti in enumerate(t):
@@ -628,7 +645,6 @@ class Guide(PyroModule):
         locs_tensor = torch.stack(selected_locs)
         scales_tensor = torch.stack(selected_scales)
         return dist.Normal(locs_tensor, scales_tensor).to_event(1) # Independent(Normal(loc: torch.Size([32, 20]), scale: torch.Size([32, 20])), 1)
-        # TODO : 이거 원래 z_dist에서 어떻게 나오는지 보자.
 
         t = t.int()
         params = [all_params[val.item()] for val in t]

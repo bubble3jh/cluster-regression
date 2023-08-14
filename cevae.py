@@ -20,8 +20,6 @@ import torch
 
 import pyro
 import pyro.distributions as dist
-# from pyro.contrib.cevae import CEVAE, PreWhitener
-from causal.cevae__init__ import CEVAE, PreWhitener
 
 import torch
 import torch.nn as nn
@@ -45,6 +43,14 @@ logging.getLogger("pyro").handlers[0].setLevel(logging.DEBUG)
 
 
 def main(args):
+    if args.use_default:
+        from pyro.contrib.cevae import CEVAE, PreWhitener
+        t_type="binary"
+        args.device = "cpu"
+    else:
+        from causal.cevae__init__ import CEVAE, PreWhitener
+        t_type="multi"
+
     utils.set_seed(args.seed)
     if args.device == "cuda" and torch.cuda.is_available(): 
         device = 'cuda'
@@ -58,7 +64,7 @@ def main(args):
     args.data_path='./data/'
     args.scaling='minmax'
     data = pd.read_csv(args.data_path+f"data_cut_{0}.csv")
-    dataset = utils.CEVAEdataset(data, args.scaling)
+    dataset = utils.CEVAEdataset(data, args.scaling, t_type)
     x, y, t = dataset.get_data()
     x = x.to(device); y = y.to(device).float(); t = t.to(device).float()
     dataset_size = x.size(0)
@@ -91,16 +97,20 @@ def main(args):
         outcome_dist='normal'
     )
 
+    kwargs = {}
+    if not args.use_default:
+        kwargs['d'] = d_train
+
     cevae.fit(
-        x_train,
-        t_train,
-        y_train,
-        d_train,
+        x = x_train,
+        t = t_train,
+        y = y_train,
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         learning_rate_decay=args.learning_rate_decay,
         weight_decay=args.weight_decay,
+        **kwargs
     )
     print("Successfully trained model!")
 
@@ -170,5 +180,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--jit", action="store_true")
     parser.add_argument("--device", default="cuda", type=str)
+    parser.add_argument("--use_default", action='store_true',
+        help = "Use default cevae file (Default : False)")
     args = parser.parse_args()
     main(args)

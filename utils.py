@@ -84,7 +84,7 @@ class Tabledata(Dataset):
     
 
 class CEVAEdataset():
-    def __init__(self, data, scale='minmax'):
+    def __init__(self, data, scale='minmax', t_type="multi"):
         columns = ['cluster', 'dis', 'danger','age', 'CT_R', 'CT_E', 'gender', 'is_korean',
            'primary case', 'job_idx', 'rep_idx', 'place_idx', 'add_idx', 'diff_days',
            'y', 'd', 'cut_date']
@@ -109,8 +109,11 @@ class CEVAEdataset():
 
         self.x=torch.tensor(data.iloc[:,2:13].values).to(torch.float32)
         self.y=torch.tensor(data.iloc[:,14:16].values).squeeze()
-        self.t=torch.tensor(data.iloc[:,1].values)*6
-        # self.t = torch.where(t >= t.mean(), torch.tensor(1), torch.tensor(0))
+        self.t=torch.tensor(data.iloc[:,1].values)
+        if t_type=="binary":
+            self.t = torch.where(self.t >= 0.5, torch.tensor(1), torch.tensor(0))
+        elif t_type=="multi":
+            self.t = self.t * 6
     def get_data(self):
         return self.x, self.y, self.t
     
