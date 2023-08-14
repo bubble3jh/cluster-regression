@@ -35,6 +35,7 @@ from pyro.infer.util import torch_item
 from pyro.nn import PyroModule
 from pyro.optim import ClippedAdam
 from pyro.util import torch_isnan
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -620,7 +621,11 @@ class Guide(PyroModule):
 
     def z_dist(self, y, d, t, x):
         # The first n-1 layers are identical for all t values.
-        y_d_x = torch.cat([y.unsqueeze(-1), d.unsqueeze(-1), x], dim=-1)
+        try:
+            y_d_x = torch.cat([y.unsqueeze(-1), d.unsqueeze(-1), x], dim=-1)
+        except:
+            import pdb;pdb.set_trace()
+
         hidden = self.z_nn(y_d_x)
         # In the final layer params are not shared among t values.
         all_params = [
@@ -738,7 +743,6 @@ class CEVAE(nn.Module):
         num_layers=3,
         num_samples=100,
     ):
-        print("using local CEVAE")
         config = dict(
             feature_dim=feature_dim,
             latent_dim=latent_dim,
@@ -746,7 +750,6 @@ class CEVAE(nn.Module):
             num_layers=num_layers,
             num_samples=num_samples,
         )
-        print(config)
         for name, size in config.items():
             if not (isinstance(size, int) and size > 0):
                 raise ValueError("Expected {} > 0 but got {}".format(name, size))
@@ -810,8 +813,8 @@ class CEVAE(nn.Module):
         )
         svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO())
         losses = []
-        for epoch in range(num_epochs):
-            for x, t, y, d in dataloader:
+        for epoch in tqdm(range(num_epochs), desc="Epoch"):
+            for x, t, y, d in tqdm(dataloader, desc="Batch", leave=False):
                 x = self.whiten(x)
                 loss = svi.step(x, t, y, d, size=len(dataset)) / len(dataset)
                 # d_loss = svi.step(x, t, d, size=len(dataset)) / len(dataset)

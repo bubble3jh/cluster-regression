@@ -32,6 +32,7 @@ import math
 
 import argparse
 import tabulate
+from prettytable import PrettyTable
 
 import utils, models, ml_algorithm
 import wandb
@@ -49,6 +50,7 @@ def main(args):
         args.device = "cpu"
     else:
         from causal.cevae__init__ import CEVAE, PreWhitener
+        print("Using local CEVAE")
         t_type="multi"
 
     utils.set_seed(args.seed)
@@ -58,7 +60,6 @@ def main(args):
     else:
         device = 'cpu'
     torch.device(device)
-    print(f'device : {device}')
 
     ## Load Data --------------------------------------------------------------------------------
     args.data_path='./data/'
@@ -155,32 +156,52 @@ def main(args):
     print("naive ATE y = {:0.3g}".format(naive_ate_y))
     print("naive ATE d = {:0.3g}".format(naive_ate_d))
 
-    if args.jit:
-        cevae = cevae.to_script_module()
-    est_ite = cevae.ite(x_test) #TODO : y,d 수정 필요
-    est_ate = est_ite.mean()
-    print("estimated ATE = {:0.3g}".format(est_ate.item()))
-    ## TODO : 그래서 잘 학습하고 난 다음, x,t 넣어주고 y,d값은 어떻게 뽑지? 뽑아야 loss를 구하는디
+    # if args.jit:
+    #     cevae = cevae.to_script_module()
+    # est_ite = cevae.ite(x_test) #TODO : y,d 수정 필요
+    # est_ate = est_ite.mean()
+    # print("estimated ATE = {:0.3g}".format(est_ate.item()))
 
-if __name__ == "__main__":
-    assert pyro.__version__.startswith("1.8.6")
-    parser = argparse.ArgumentParser(
-        description="Causal Effect Variational Autoencoder"
-    )
-    parser.add_argument("--num-data", default=13061, type=int)
-    parser.add_argument("--feature-dim", default=11, type=int)
-    parser.add_argument("--latent-dim", default=20, type=int)
-    parser.add_argument("--hidden-dim", default=200, type=int)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Hyperparameters Configuration")
+    parser.add_argument("--num_data", default=13061, type=int)
+    parser.add_argument("--feature_dim", default=11, type=int)
+    parser.add_argument("--latent_dim", default=20, type=int)
+    parser.add_argument("--hidden_dim", default=200, type=int)
     parser.add_argument("--num-layers", default=3, type=int)
-    parser.add_argument("-n", "--num-epochs", default=50, type=int)
-    parser.add_argument("-b", "--batch-size", default=32, type=int)
-    parser.add_argument("-lr", "--learning-rate", default=1e-3, type=float)
-    parser.add_argument("-lrd", "--learning-rate-decay", default=0.1, type=float)
+    parser.add_argument("-n", "--num_epochs", default=50, type=int)
+    parser.add_argument("-b", "--batch_size", default=32, type=int)
+    parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
+    parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
     parser.add_argument("--weight-decay", default=1e-4, type=float)
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--jit", action="store_true")
     parser.add_argument("--device", default="cuda", type=str)
-    parser.add_argument("--use_default", action='store_true',
-        help = "Use default cevae file (Default : False)")
+    parser.add_argument("--use_default", action='store_true', help="Use default cevae file (Default : False)")
+
     args = parser.parse_args()
+    return args
+
+if __name__ == "__main__":
+    assert pyro.__version__.startswith("1.8.6")
+    table = PrettyTable()
+    args = parse_args()
+    table = PrettyTable()
+    table.field_names = ["Parameter", "Value"]
+    table.add_row(["Number of Data", args.num_data])
+    table.add_row(["Feature Dimension", args.feature_dim])
+    table.add_row(["Latent Dimension", args.latent_dim])
+    table.add_row(["Hidden Dimension", args.hidden_dim])
+    table.add_row(["Number of Layers", args.num_layers])
+    table.add_row(["Number of Epochs", args.num_epochs])
+    table.add_row(["Batch Size", args.batch_size])
+    table.add_row(["Learning Rate", args.learning_rate])
+    table.add_row(["Learning Rate Decay", args.learning_rate_decay])
+    table.add_row(["Weight Decay", args.weight_decay])
+    table.add_row(["Seed", args.seed])
+    table.add_row(["JIT Compilation", args.jit])
+    table.add_row(["Device", args.device])
+    table.add_row(["Use Default CEVAE File", args.use_default])
+    print("Hyperparameters Configuration:")
+    print(table)
     main(args)
