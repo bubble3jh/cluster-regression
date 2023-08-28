@@ -38,7 +38,6 @@ import utils, models, ml_algorithm
 import wandb
 from torch.utils.data import DataLoader, random_split, ConcatDataset, TensorDataset
 from tqdm import tqdm
-
 logging.getLogger("pyro").setLevel(logging.DEBUG)
 logging.getLogger("pyro").handlers[0].setLevel(logging.DEBUG)
 
@@ -57,6 +56,7 @@ def main(args):
     if args.device == "cuda" and torch.cuda.is_available(): 
         device = 'cuda'
         torch.set_default_tensor_type("torch.cuda.FloatTensor")
+        generator = torch.Generator(device=device)
     else:
         device = 'cpu'
     torch.device(device)
@@ -65,24 +65,26 @@ def main(args):
     args.data_path='./data/'
     args.scaling='minmax'
     data = pd.read_csv(args.data_path+f"data_cut_{0}.csv")
-    dataset = utils.CEVAEdataset(data, args.scaling, t_type)
-    x, y, t = dataset.get_data()
-    x = x.to(device); y = y.to(device).float(); t = t.to(device).float()
-    dataset_size = x.size(0)
+    # dataset = utils.CEVAEdataset(data, args.scaling, t_type)
+    dataset = utils.Tabledata(data, scale="minmax", use_treatment=True)
+    train_dataset, val_dataset, test_dataset = random_split(dataset, [int(0.8 * len(dataset)), int(0.1 * len(dataset)), len(dataset) - int(0.8 * len(dataset)) - int(0.1 * len(dataset))], generator=generator)
+    # x, y, t = dataset.get_data()
+    # x = x.to(device); y = y.to(device).float(); t = t.to(device).float()
+    # dataset_size = x.size(0)
 
-    indices = torch.randperm(dataset_size)
-    train_ratio = 0.8
-    train_size = int(train_ratio * dataset_size)
+    # indices = torch.randperm(dataset_size)
+    # train_ratio = 0.8
+    # train_size = int(train_ratio * dataset_size)
 
-    x_train = x[indices[:train_size]]
-    y_train = y[indices[:train_size]][:,0]
-    d_train = y[indices[:train_size]][:,1]
-    t_train = t[indices[:train_size]]
+    # x_train = x[indices[:train_size]]
+    # y_train = y[indices[:train_size]][:,0]
+    # d_train = y[indices[:train_size]][:,1]
+    # t_train = t[indices[:train_size]]
 
-    x_test = x[indices[train_size:]]
-    y_test = y[indices[train_size:]][:,0]
-    d_test = y[indices[train_size:]][:,1]
-    t_test = t[indices[train_size:]]
+    # x_test = x[indices[train_size:]]
+    # y_test = y[indices[train_size:]][:,0]
+    # d_test = y[indices[train_size:]][:,1]
+    # t_test = t[indices[train_size:]]
     print("Successfully load data!")
 
     #-------------------------------------------------------------------------------------
@@ -95,43 +97,45 @@ def main(args):
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_samples=10,
-        outcome_dist='normal'
+        outcome_dist='normal',
+        ignore_wandb=args.ignore_wandb
     )
 
-    kwargs = {}
-    if not args.use_default:
-        kwargs['d'] = d_train
-
     cevae.fit(
-        x = x_train,
-        t = t_train,
-        y = y_train,
+        train_dataset,
+        val_dataset,
+        test_dataset,
         num_epochs=args.num_epochs,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         learning_rate_decay=args.learning_rate_decay,
         weight_decay=args.weight_decay,
-        **kwargs
     )
     print("Successfully trained model!")
 
     #-------------------------------------------------------------------------------------
     # Evaluate.
-
     y_diffs = []
     d_diffs = []
-    testdataset = TensorDataset(x_test, t_test, y_test, d_test)
-    dl = DataLoader(testdataset, batch_size=16)
-    whiten = PreWhitener(x_test)
+    dl = DataLoader(test_dataset, batch_size=16)
+    # whiten = PreWhitener(x_test)
     with tqdm(initial = 0, total = len(dl)) as pbar:
-        pbar.set_description('calculating loss')
-        for x, t, y, d in dl:
-            x = whiten(x)
-            y_hat = cevae.model.y_mean(x, t)
-            d_hat = cevae.model.d_mean(x, t) 
-            
-            y_diffs.append(y - y_hat)
-            d_diffs.append(d - d_hat)
+        with torch.no_grad():
+            pbar.set_description('calculating loss')
+            for cont, cat, _len, yd, diff, t in dl:
+                x = cevae.x_emb(cont, cat, _len, diff)
+                x = cevae.transformer_encoder(x, _len)
+                # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
+                t = (t*6)
+                y_hat = cevae.model.y_mean(x, t)
+                d_hat = cevae.model.d_mean(x, t) 
+                y_ori_hat = utils.restore_minmax(y_hat, test_dataset.dataset.a_y, test_dataset.dataset.b_y)
+                d_ori_hat = utils.restore_minmax(d_hat, test_dataset.dataset.a_d, test_dataset.dataset.b_d)
+                y_original = utils.restore_minmax(yd[:, 0], test_dataset.dataset.a_y, test_dataset.dataset.b_y)
+                d_original = utils.restore_minmax(yd[:, 1], test_dataset.dataset.a_d, test_dataset.dataset.b_d)
+                
+                y_diffs.append(y_original - y_ori_hat)
+                d_diffs.append(d_original - d_ori_hat)
             pbar.update(1)
     
     y_diffs_tensor = torch.cat(y_diffs)
@@ -151,10 +155,10 @@ def main(args):
     df['D-values'] = [d_mae.item(), d_rmse.item()]
     display(df)
 
-    naive_ate_y = y_test[t_test == 1].mean() - y_test[t_test == 0].mean()
-    naive_ate_d = d_test[t_test == 1].mean() - d_test[t_test == 0].mean()
-    print("naive ATE y = {:0.3g}".format(naive_ate_y))
-    print("naive ATE d = {:0.3g}".format(naive_ate_d))
+    # naive_ate_y = y_test[t_test == 1].mean() - y_test[t_test == 0].mean()
+    # naive_ate_d = d_test[t_test == 1].mean() - d_test[t_test == 0].mean()
+    # print("naive ATE y = {:0.3g}".format(naive_ate_y))
+    # print("naive ATE d = {:0.3g}".format(naive_ate_d))
 
     # if args.jit:
     #     cevae = cevae.to_script_module()
@@ -164,12 +168,11 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Hyperparameters Configuration")
-    parser.add_argument("--num_data", default=13061, type=int)
-    parser.add_argument("--feature_dim", default=11, type=int)
+    parser.add_argument("--feature_dim", default=128, type=int)
     parser.add_argument("--latent_dim", default=20, type=int)
     parser.add_argument("--hidden_dim", default=200, type=int)
     parser.add_argument("--num-layers", default=3, type=int)
-    parser.add_argument("-n", "--num_epochs", default=50, type=int)
+    parser.add_argument("-n", "--num_epochs", default=100, type=int)
     parser.add_argument("-b", "--batch_size", default=32, type=int)
     parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
     parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
@@ -178,7 +181,8 @@ def parse_args():
     parser.add_argument("--jit", action="store_true")
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--use_default", action='store_true', help="Use default cevae file (Default : False)")
-
+    parser.add_argument("--ignore_wandb", action='store_true',
+        help = "Stop using wandb (Default : False)")
     args = parser.parse_args()
     return args
 
@@ -188,7 +192,6 @@ if __name__ == "__main__":
     args = parse_args()
     table = PrettyTable()
     table.field_names = ["Parameter", "Value"]
-    table.add_row(["Number of Data", args.num_data])
     table.add_row(["Feature Dimension", args.feature_dim])
     table.add_row(["Latent Dimension", args.latent_dim])
     table.add_row(["Hidden Dimension", args.hidden_dim])

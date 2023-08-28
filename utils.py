@@ -14,10 +14,14 @@ from torch.utils.data import Dataset
 
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
-    def __init__(self, data, scale='minmax'):
+    def __init__(self, data, scale='minmax', use_treatment=False):
+        self.use_treatment = use_treatment
         # padding tensors
         self.diff_tensor = torch.zeros([124,1])
-        self.cont_tensor = torch.zeros([124,5])
+        if use_treatment:
+            self.cont_tensor = torch.zeros([124,4])
+        else:
+            self.cont_tensor = torch.zeros([124,5])
         self.cat_tensor = torch.zeros([124,7])
         yd=[]
         for _, group in data.groupby('cluster'):
@@ -42,7 +46,12 @@ class Tabledata(Dataset):
 
         ## 데이터 특성 별 분류 및 저장 ##
         self.cluster = data.iloc[:,0].values.astype('float32')
-        self.cont_X = data.iloc[:, 1:6].values.astype('float32')
+        if use_treatment:
+            self.dis = data['dis'].values.astype('float32')
+            self.cont_X = data.iloc[:, 1:6].drop(columns=['dis']).values.astype('float32')
+        else:
+            self.dis=None
+            self.cont_X = data.iloc[:, 1:6].values.astype('float32')
         self.cat_X = data.iloc[:, 6:13].astype('category')
         self.diff_days = data.iloc[:, 13].values.astype('float32')
         self.y = yd.values.astype('float32')
@@ -79,9 +88,12 @@ class Tabledata(Dataset):
         cat_tensor_c = cat_tensor[:, 5:]
         cont_tensor_p = cont_tensor[:, :3]
         cont_tensor_c = cont_tensor[:, 3:]
-        y = torch.tensor(self.y[index]) 
-        return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor
-    
+        y = torch.tensor(self.y[index])
+        if not self.use_treatment:
+            return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor
+        else:
+            dis = torch.tensor(self.dis[index])
+            return cont_tensor, cat_tensor, data_len, y, diff_tensor, dis
 
 class CEVAEdataset():
     def __init__(self, data, scale='minmax', t_type="multi"):

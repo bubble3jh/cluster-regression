@@ -22,7 +22,7 @@ using components :class:`Model`, :class:`Guide`,
     | https://github.com/AMLab-Amsterdam/CEVAE
 """
 import logging
-
+import utils
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -36,6 +36,10 @@ from pyro.nn import PyroModule
 from pyro.optim import ClippedAdam
 from pyro.util import torch_isnan
 from tqdm import tqdm
+from models import CEVAEEmbedding, CEVAETransformer
+import pandas as pd
+from IPython.display import display
+import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +381,6 @@ class Model(PyroModule):
         if size is None:
             size = x.size(0)
         with pyro.plate("data", size, subsample=x):
-            # import pdb;pdb.set_trace()
             z = pyro.sample("z", self.z_dist())
             x = pyro.sample("x", self.x_dist(z), obs=x)
             t = pyro.sample("t", self.t_dist(z), obs=t)
@@ -554,7 +557,8 @@ class Guide(PyroModule):
             # the auxiliary CEVAE loss. We mark them auxiliary to indicate they
             # do not correspond to latent variables during training.
             t = pyro.sample("t", self.t_dist(x), obs=t, infer={"is_auxiliary": True})
-            y = pyro.sample("y", self.y_dist(t, x), obs=y, infer={"is_auxiliary": True})
+            y_dis = self.y_dist(t, x)
+            y = pyro.sample("y", y_dis, obs=y, infer={"is_auxiliary": True})
             d = pyro.sample("d", self.d_dist(t, x), obs=d, infer={"is_auxiliary": True})
             # The z site participates only in the usual ELBO loss.
             pyro.sample("z", self.z_dist(y, d, t, x))
@@ -625,7 +629,6 @@ class Guide(PyroModule):
             y_d_x = torch.cat([y.unsqueeze(-1), d.unsqueeze(-1), x], dim=-1)
         except:
             import pdb;pdb.set_trace()
-
         hidden = self.z_nn(y_d_x)
         # In the final layer params are not shared among t values.
         all_params = [
@@ -735,7 +738,9 @@ class CEVAE(nn.Module):
         hidden_dim=200,
         num_layers=3,
         num_samples=100,
+        ignore_wandb=False
     ):
+        self.ignore_wandb=ignore_wandb
         config = dict(
             feature_dim=feature_dim,
             latent_dim=latent_dim,
@@ -743,6 +748,8 @@ class CEVAE(nn.Module):
             num_layers=num_layers,
             num_samples=num_samples,
         )
+        if not ignore_wandb:
+            wandb.init(entity="mlai_medical_ai" ,project="causal-effect-vae", config=config)
         for name, size in config.items():
             if not (isinstance(size, int) and size > 0):
                 raise ValueError("Expected {} > 0 but got {}".format(name, size))
@@ -754,18 +761,19 @@ class CEVAE(nn.Module):
         self.model = Model(config)
         self.guide = Guide(config)
 
+        self.x_emb = CEVAEEmbedding()
+        self.transformer_encoder = CEVAETransformer(input_size=128, hidden_size=64, num_layers=3, num_heads=2, drop_out=0)
     def fit(
         self,
-        x,
-        t,
-        y,
-        d,
+        train_dataset,
+        valid_dataset,
+        test_dataset,
         num_epochs=100,
         batch_size=100,
         learning_rate=1e-3,
         learning_rate_decay=0.1,
         weight_decay=1e-4,
-        log_every=100,
+        log_every=1,
     ):
         """
         Train using :class:`~pyro.infer.svi.SVI` with the
@@ -787,16 +795,17 @@ class CEVAE(nn.Module):
             do not log loss. Defaults to 100.
         :return: list of epoch losses
         """
-        assert x.dim() == 2 and x.size(-1) == self.feature_dim
-        assert t.shape == x.shape[:1]
-        assert y.shape == y.shape[:1]
-        assert d.shape == d.shape[:1]
-        self.whiten = PreWhitener(x)
-
-        dataset = TensorDataset(x, t, y, d)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, generator=torch.Generator(device='cuda'))
-        logger.info("Training with {} minibatches per epoch".format(len(dataloader)))
-        num_steps = num_epochs * len(dataloader)
+        # assert x.dim() == 2 and x.size(-1) == self.feature_dim
+        # assert t.shape == x.shape[:1]
+        # assert y.shape == y.shape[:1]
+        # assert d.shape == d.shape[:1]
+        self.whiten = None
+        # dataset = TensorDataset(x, t, y, d)
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, generator=torch.Generator(device='cuda'))
+        valid_dataloader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, generator=torch.Generator(device='cuda'))
+        test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, generator=torch.Generator(device='cuda'))
+        logger.info("Training with {} minibatches per epoch".format(len(train_dataloader)))
+        num_steps = num_epochs * len(train_dataloader)
         optim = ClippedAdam(
             {
                 "lr": learning_rate,
@@ -805,21 +814,58 @@ class CEVAE(nn.Module):
             }
         )
         svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO())
-        losses = []
-        for epoch in tqdm(range(num_epochs), desc="Epoch"):
-            for x, t, y, d in tqdm(dataloader, desc="Batch", leave=False):
-                x = self.whiten(x)
-                loss = svi.step(x, t, y, d, size=len(dataset)) / len(dataset)
-                # d_loss = svi.step(x, t, d, size=len(dataset)) / len(dataset)
-                # loss = y_loss + d_loss
-                if log_every and len(losses) % log_every == 0:
-                    logger.debug(
-                        "step {: >5d} loss = {:0.6g}".format(len(losses), loss)
-                    )
-                assert not torch_isnan(loss)
-                losses.append(loss)
-        return losses
+        #--------------------------------------------------------------------
+        # losses = []; dataloader=train_dataloader; dataset=train_dataset
+        # for epoch in tqdm(range(num_epochs), desc="Epoch"):
+        #     for cont, cat, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
+        #         if False :        
+        #             self.whiten = PreWhitener(x) #TODO : 이거 x 데이터 처리 후 들어가야함 수정 필요
+        #         x = self.x_emb(cont, cat, _len, diff)
+        #         x = self.transformer_encoder(x, _len)
+        #         # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
+        #         t = (t*6)
+        #         loss = svi.step(x, t, yd[:,0], yd[:,1], size=len(dataset)) / len(dataset)
+        #         assert not torch_isnan(loss)
+        #         losses.append(loss)
+        #         print(
+        #             "step {: >5d} loss = {:0.6g}".format(len(losses), loss)
+        #         )
+        # return losses
+        #--------------------------------------------------------------------
+        best_mae = float('inf')
+        train_losses = []; val_losses = []; test_losses =[];train_epoch_loss=[];val_epoch_loss =[]; test_epoch_loss=[]
+        with tqdm(initial = 0, total = num_epochs) as pbar:
+            for i in range(num_epochs):
+                train_epoch_loss = self.cal_svi_loss(train_dataloader, train_dataset, svi)
+                val_epoch_loss = self.cal_svi_loss(valid_dataloader, valid_dataset, svi, eval=True)
+                test_epoch_loss = self.cal_svi_loss(test_dataloader, test_dataset, svi, eval=True)
+                train_losses= train_losses + train_epoch_loss; val_losses = val_losses + val_epoch_loss; test_losses = test_losses + test_epoch_loss
+                train_metrics = self.cal_yd_loss(train_dataloader, train_dataset, data_type="train")
+                val_metrics = self.cal_yd_loss(valid_dataloader, valid_dataset, data_type="val")
+                test_metrics = self.cal_yd_loss(test_dataloader, test_dataset, data_type="test")
 
+                val_mae_sum = val_metrics['val_y_mae'] + val_metrics['val_d_mae']
+
+                # WandB로 메트릭 로깅
+                if not self.ignore_wandb:  
+                    ce_metrics = {
+                    'train_CE_ELBO': sum(train_epoch_loss)/len(train_epoch_loss),
+                    'valid_CE_ELBO': sum(val_losses)/len(val_losses),
+                    'test_CE_ELBO': sum(test_losses)/len(test_losses),
+                    }
+                    epoch_metrics = {**train_metrics, **val_metrics, **test_metrics, **ce_metrics}              
+                    
+                    wandb.log(epoch_metrics)
+                    if val_mae_sum < best_mae:
+                        best_mae = val_mae_sum
+                        wandb.run.summary["best_train_ceelbo_loss"] = sum(train_epoch_loss)/len(train_epoch_loss)
+                        wandb.run.summary["best_val_ceelbo_loss"] = sum(val_losses)/len(val_losses)
+                        wandb.run.summary["best_test_ceelbo_loss"] = sum(test_losses)/len(test_losses)
+                pbar.set_description(f'tr_loss: {sum(train_epoch_loss)/len(train_epoch_loss):.4f} / val_loss: {sum(val_losses)/len(val_losses):.4f} / test_loss: {sum(test_losses)/len(test_losses):.4f}')
+                pbar.update(1)
+                
+        return train_losses, val_losses, test_losses
+    
     @torch.no_grad()
     def ite(self, x, num_samples=None, batch_size=None):
         r"""
@@ -877,3 +923,77 @@ class CEVAE(nn.Module):
             # Disable check_trace due to nondeterministic nodes.
             result = torch.jit.trace_module(self, {"ite": (fake_x,)}, check_trace=False)
         return result
+    
+    def cal_svi_loss(self, dataloader, dataset, svi, eval = False):
+        losses = []
+        if eval:
+            self.set_mode("eval")
+            with torch.no_grad():  # Disable gradient computation
+                for cont, cat, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
+                    if False :        
+                        self.whiten = PreWhitener(x) #TODO : 이거 x 데이터 처리 후 들어가야함 수정 필요
+                    x = self.x_emb(cont, cat, _len, diff)
+                    x = self.transformer_encoder(x, _len)
+                    # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
+                    t = (t*6)
+                    loss = svi.step(x, t, yd[:,0], yd[:,1], size=len(dataset)) / len(dataset)
+                    assert not torch_isnan(loss)
+                    losses.append(loss)
+        else:
+            self.set_mode("train")
+            for cont, cat, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
+                if False :        
+                    self.whiten = PreWhitener(x) #TODO : 이거 x 데이터 처리 후 들어가야함 수정 필요
+                x = self.x_emb(cont, cat, _len, diff)
+                x = self.transformer_encoder(x, _len)
+                # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
+                t = (t*6)
+                loss = svi.step(x, t, yd[:,0], yd[:,1], size=len(dataset)) / len(dataset)
+                assert not torch_isnan(loss)
+                losses.append(loss)
+        return losses
+    
+    @torch.no_grad()
+    def cal_yd_loss(self, dl, dataset, data_type):
+        y_diffs = []
+        d_diffs = []
+        for cont, cat, _len, yd, diff, t in dl:
+            x = self.x_emb(cont, cat, _len, diff)
+            x = self.transformer_encoder(x, _len)
+            # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
+            t = (t*6)
+            y_hat = self.model.y_mean(x, t)
+            d_hat = self.model.d_mean(x, t) 
+            y_ori_hat = utils.restore_minmax(y_hat, dataset.dataset.a_y, dataset.dataset.b_y)
+            d_ori_hat = utils.restore_minmax(d_hat, dataset.dataset.a_d, dataset.dataset.b_d)
+            y_original = utils.restore_minmax(yd[:, 0], dataset.dataset.a_y, dataset.dataset.b_y)
+            d_original = utils.restore_minmax(yd[:, 1], dataset.dataset.a_d, dataset.dataset.b_d)
+            
+            y_diffs.append(y_original - y_ori_hat)
+            d_diffs.append(d_original - d_ori_hat)
+    
+        y_diffs_tensor = torch.cat(y_diffs)
+        d_diffs_tensor = torch.cat(d_diffs)
+
+        y_mae = torch.mean(torch.abs(y_diffs_tensor))
+        y_rmse = torch.sqrt(torch.mean(y_diffs_tensor ** 2))
+
+        d_mae = torch.mean(torch.abs(d_diffs_tensor))
+        d_rmse = torch.sqrt(torch.mean(d_diffs_tensor ** 2))
+        metrics = {
+            f'{data_type}_y_mae': y_mae,
+            f'{data_type}_y_rmse': y_rmse,
+            f'{data_type}_d_mae': d_mae,
+            f'{data_type}_d_rmse': d_rmse
+        }
+        return metrics
+    
+    def set_mode(self, mode):
+        for obj in [self.model, self.guide, self.x_emb, self.transformer_encoder]:
+            if isinstance(obj, torch.nn.Module):
+                if mode == 'train':
+                    obj.train()
+                elif mode == 'eval':
+                    obj.eval()
+                else:
+                    raise ValueError("Mode must be 'train' or 'eval'")
