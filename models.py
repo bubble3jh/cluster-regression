@@ -207,6 +207,62 @@ class CEVAE(torch.nn.Module):
         return regression_output
     
   
+# class CEVAEEmbedding(torch.nn.Module):
+#     '''
+#         output_size : embedding output의 크기
+#         disable_embedding : 연속 데이터의 임베딩 유무
+#         disable_pe : transformer의 sequance 기준 positional encoding add 유무
+#         reduction : "mean" : cluster 별 평균으로 reduction
+#                     "date" : cluster 내 date 평균으로 reduction
+#     '''
+#     def __init__(self, output_size=128, disable_embedding=False, disable_pe=False, reduction="date"):
+#         super().__init__()
+#         self.reduction = reduction
+#         self.disable_embedding = disable_embedding
+#         self.disable_pe = disable_pe
+#         if not disable_embedding:
+#             print("Embedding applied to data")
+#             nn_dim = emb_hidden_dim = emb_dim_c = emb_dim_p = output_size//4
+#             emb_dim = emb_dim_c + emb_dim_p
+#             self.cont_NN = nn.Sequential(nn.Linear(4, emb_hidden_dim),
+#                                         nn.ReLU(),
+#                                         nn.Linear(emb_hidden_dim, nn_dim * 2))
+#         else:
+#             emb_dim_p = 5
+#             emb_dim_c = 2
+#         self.lookup_gender  = nn.Embedding(2, emb_dim)
+#         self.lookup_korean  = nn.Embedding(2, emb_dim)
+#         self.lookup_primary  = nn.Embedding(2, emb_dim)
+#         self.lookup_job  = nn.Embedding(11, emb_dim)
+#         self.lookup_rep  = nn.Embedding(34, emb_dim)
+#         self.lookup_place  = nn.Embedding(19, emb_dim)
+#         self.lookup_add  = nn.Embedding(31, emb_dim)
+#         if not disable_pe:
+#             self.positional_embedding  = nn.Embedding(5, output_size)
+
+#     def forward(self, cont, cat, val_len, diff_days):
+#         if not self.disable_embedding:
+#             cont_emb = self.cont_NN(cont)
+#         a1_embs = self.lookup_gender(cat[:,:,0].to(torch.int))
+#         a2_embs = self.lookup_korean(cat[:,:,1].to(torch.int))
+#         a3_embs = self.lookup_primary(cat[:,:,2].to(torch.int))
+#         a4_embs = self.lookup_job(cat[:,:,3].to(torch.int))
+#         a5_embs = self.lookup_rep(cat[:,:,4].to(torch.int))
+#         a6_embs = self.lookup_place(cat[:,:,5].to(torch.int))
+#         a7_embs = self.lookup_add(cat[:,:,6].to(torch.int))
+        
+#         cat_emb = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs, a6_embs, a7_embs]), axis=0)
+
+#         if not self.disable_embedding:
+#             x = torch.cat((cat_emb, cont_emb), dim=2)
+#         else:
+#             x = torch.cat((cat_emb, cont), dim=2)
+            
+#         if not self.disable_pe:
+#             x = x + self.positional_embedding(diff_days.int().squeeze(2))
+#         return reduction_cluster(x, diff_days, val_len, self.reduction)
+    
+
 class CEVAEEmbedding(torch.nn.Module):
     '''
         output_size : embedding output의 크기
@@ -222,11 +278,13 @@ class CEVAEEmbedding(torch.nn.Module):
         self.disable_pe = disable_pe
         if not disable_embedding:
             print("Embedding applied to data")
-            nn_dim = emb_hidden_dim = emb_dim_c = emb_dim_p = output_size//4
-            emb_dim = emb_dim_c + emb_dim_p
-            self.cont_NN = nn.Sequential(nn.Linear(4, emb_hidden_dim),
+            nn_dim = emb_hidden_dim = emb_dim = output_size//4
+            self.cont_p_NN = nn.Sequential(nn.Linear(3, emb_hidden_dim),
                                         nn.ReLU(),
-                                        nn.Linear(emb_hidden_dim, nn_dim * 2))
+                                        nn.Linear(emb_hidden_dim, nn_dim))
+            self.cont_c_NN = nn.Sequential(nn.Linear(1, emb_hidden_dim),
+                                        nn.ReLU(),
+                                        nn.Linear(emb_hidden_dim, nn_dim))
         else:
             emb_dim_p = 5
             emb_dim_c = 2
@@ -240,23 +298,25 @@ class CEVAEEmbedding(torch.nn.Module):
         if not disable_pe:
             self.positional_embedding  = nn.Embedding(5, output_size)
 
-    def forward(self, cont, cat, val_len, diff_days):
+    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         if not self.disable_embedding:
-            cont_emb = self.cont_NN(cont)
-        a1_embs = self.lookup_gender(cat[:,:,0].to(torch.int))
-        a2_embs = self.lookup_korean(cat[:,:,1].to(torch.int))
-        a3_embs = self.lookup_primary(cat[:,:,2].to(torch.int))
-        a4_embs = self.lookup_job(cat[:,:,3].to(torch.int))
-        a5_embs = self.lookup_rep(cat[:,:,4].to(torch.int))
-        a6_embs = self.lookup_place(cat[:,:,5].to(torch.int))
-        a7_embs = self.lookup_add(cat[:,:,6].to(torch.int))
+            cont_p_emb = self.cont_p_NN(cont_p)
+            cont_c_emb = self.cont_c_NN(cont_c)
+        a1_embs = self.lookup_gender(cat_p[:,:,0].to(torch.int))
+        a2_embs = self.lookup_korean(cat_p[:,:,1].to(torch.int))
+        a3_embs = self.lookup_primary(cat_p[:,:,2].to(torch.int))
+        a4_embs = self.lookup_job(cat_p[:,:,3].to(torch.int))
+        a5_embs = self.lookup_rep(cat_p[:,:,4].to(torch.int))
+        a6_embs = self.lookup_place(cat_c[:,:,0].to(torch.int))
+        a7_embs = self.lookup_add(cat_c[:,:,1].to(torch.int))
         
-        cat_emb = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs, a6_embs, a7_embs]), axis=0)
+        cat_p_emb = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs]), axis=0)
+        cat_c_emb = torch.mean(torch.stack([a6_embs, a7_embs]), axis=0)
 
         if not self.disable_embedding:
-            x = torch.cat((cat_emb, cont_emb), dim=2)
+            x = torch.cat((cat_p_emb, cat_c_emb, cont_p_emb, cont_c_emb), dim=2)
         else:
-            x = torch.cat((cat_emb, cont), dim=2)
+            x = torch.cat((cat_p_emb, cat_c_emb, cont_p, cont_c), dim=2)
             
         if not self.disable_pe:
             x = x + self.positional_embedding(diff_days.int().squeeze(2))

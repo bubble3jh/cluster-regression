@@ -93,7 +93,8 @@ class Tabledata(Dataset):
             return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor
         else:
             dis = torch.tensor(self.dis[index])
-            return cont_tensor, cat_tensor, data_len, y, diff_tensor, dis
+            # return cont_tensor, cat_tensor, data_len, y, diff_tensor, dis
+            return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor, dis
 
 class CEVAEdataset():
     def __init__(self, data, scale='minmax', t_type="multi"):

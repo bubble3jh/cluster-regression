@@ -386,7 +386,7 @@ class Model(PyroModule):
             t = pyro.sample("t", self.t_dist(z), obs=t)
             y = pyro.sample("y", self.y_dist(t, z), obs=y)
             d = pyro.sample("d", self.d_dist(t, z), obs=d)
-        return y,d #TODO : 이거 왜 됨? return y해준거랑 return y,d 해준거랑 둘 다 코드 돌아가 이거 왜이래
+        return y,d # svi.step에서는 안쓴다..?
 
     def y_mean(self, x, t=None):
         with pyro.plate("data", x.size(0)):
@@ -549,19 +549,23 @@ class Guide(PyroModule):
         self.z5_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
         self.z6_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
 
-    def forward(self, x, t=None, y=None, d=None, size=None):
+    def forward(self, x, t=None, y=None, d=None, size=None, mode=None):
         if size is None:
             size = x.size(0)
-        with pyro.plate("data", size, subsample=x):
-            # The t and y sites are needed for prediction, and participate in
-            # the auxiliary CEVAE loss. We mark them auxiliary to indicate they
-            # do not correspond to latent variables during training.
-            t = pyro.sample("t", self.t_dist(x), obs=t, infer={"is_auxiliary": True})
-            y_dis = self.y_dist(t, x)
-            y = pyro.sample("y", y_dis, obs=y, infer={"is_auxiliary": True})
-            d = pyro.sample("d", self.d_dist(t, x), obs=d, infer={"is_auxiliary": True})
-            # The z site participates only in the usual ELBO loss.
-            pyro.sample("z", self.z_dist(y, d, t, x))
+        if mode != "eval":
+            with pyro.plate("data", size, subsample=x):
+                # The t and y sites are needed for prediction, and participate in
+                # the auxiliary CEVAE loss. We mark them auxiliary to indicate they
+                # do not correspond to latent variables during training.
+                t = pyro.sample("t", self.t_dist(x), obs=t, infer={"is_auxiliary": True})
+                y = pyro.sample("y", self.y_dist(t, x), obs=y, infer={"is_auxiliary": True})
+                d = pyro.sample("d", self.d_dist(t, x), obs=d, infer={"is_auxiliary": True})
+                # The z site participates only in the usual ELBO loss.
+                pyro.sample("z", self.z_dist(y, d, t, x))
+        else :
+            y = self.y_dist(t, x).mean
+            d = self.d_dist(t, x).mean
+            return y, d
 
     def t_dist(self, x):
         (logits,) = self.t_nn(x)
@@ -661,6 +665,9 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
 
         -loss = ELBO + log q(t|x) + log q(y|t,x)
     """
+    def __init__(self, lambdas, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.lambdas = lambdas
 
     def _differentiable_loss_particle(self, model_trace, guide_trace):
         # Construct -ELBO part.
@@ -675,10 +682,10 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
         loss, surrogate_loss = super()._differentiable_loss_particle(
             model_trace, blocked_guide_trace
         )
-        # Add log q terms. 
-        for name in blocked_names:
+        # Add log q terms. \
+        for i, name in enumerate(blocked_names): #for 문에서 lambdas 추가?
             log_q = guide_trace.nodes[name]["log_prob_sum"]
-            loss = loss - torch_item(log_q)
+            loss = loss - torch_item(log_q) * self.lambdas[i]
             surrogate_loss = surrogate_loss - log_q
 
         return loss, surrogate_loss
@@ -738,8 +745,10 @@ class CEVAE(nn.Module):
         hidden_dim=200,
         num_layers=3,
         num_samples=100,
-        ignore_wandb=False
+        ignore_wandb=False,
+        lambdas=None
     ):
+        self.lambdas = lambdas
         self.ignore_wandb=ignore_wandb
         config = dict(
             feature_dim=feature_dim,
@@ -763,6 +772,7 @@ class CEVAE(nn.Module):
 
         self.x_emb = CEVAEEmbedding()
         self.transformer_encoder = CEVAETransformer(input_size=128, hidden_size=64, num_layers=3, num_heads=2, drop_out=0)
+
     def fit(
         self,
         train_dataset,
@@ -813,7 +823,7 @@ class CEVAE(nn.Module):
                 "lrd": learning_rate_decay ** (1 / num_steps),
             }
         )
-        svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO())
+        svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO(lambdas=self.lambdas))
         #--------------------------------------------------------------------
         # losses = []; dataloader=train_dataloader; dataset=train_dataset
         # for epoch in tqdm(range(num_epochs), desc="Epoch"):
@@ -858,9 +868,26 @@ class CEVAE(nn.Module):
                     wandb.log(epoch_metrics)
                     if val_mae_sum < best_mae:
                         best_mae = val_mae_sum
+                        wandb.run.summary["best_epoch"] = i
                         wandb.run.summary["best_train_ceelbo_loss"] = sum(train_epoch_loss)/len(train_epoch_loss)
                         wandb.run.summary["best_val_ceelbo_loss"] = sum(val_losses)/len(val_losses)
                         wandb.run.summary["best_test_ceelbo_loss"] = sum(test_losses)/len(test_losses)
+                        
+                        wandb.run.summary["best_train_y_mae_loss"] = train_metrics["train_y_mae"]
+                        wandb.run.summary["best_train_y_rmse_loss"] = train_metrics["train_y_rmse"]
+                        wandb.run.summary["best_train_d_mae_loss"] = train_metrics["train_d_mae"]
+                        wandb.run.summary["best_train_d_rmse_loss"] = train_metrics["train_d_rmse"]
+
+                        wandb.run.summary["best_val_y_mae_loss"] = val_metrics["val_y_mae"]
+                        wandb.run.summary["best_val_y_rmse_loss"] = val_metrics["val_y_rmse"]
+                        wandb.run.summary["best_val_d_mae_loss"] = val_metrics["val_d_mae"]
+                        wandb.run.summary["best_val_d_rmse_loss"] = val_metrics["val_d_rmse"]
+
+                        wandb.run.summary["best_test_y_mae_loss"] = test_metrics["test_y_mae"]
+                        wandb.run.summary["best_test_y_rmse_loss"] = test_metrics["test_y_rmse"]
+                        wandb.run.summary["best_test_d_mae_loss"] = test_metrics["test_d_mae"]
+                        wandb.run.summary["best_test_d_rmse_loss"] = test_metrics["test_d_rmse"]
+
                 pbar.set_description(f'tr_loss: {sum(train_epoch_loss)/len(train_epoch_loss):.4f} / val_loss: {sum(val_losses)/len(val_losses):.4f} / test_loss: {sum(test_losses)/len(test_losses):.4f}')
                 pbar.update(1)
                 
@@ -929,10 +956,12 @@ class CEVAE(nn.Module):
         if eval:
             self.set_mode("eval")
             with torch.no_grad():  # Disable gradient computation
-                for cont, cat, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
+                for cont_p, cont_c, cat_p, cat_c, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
+                # for cont, cat, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
                     if False :        
                         self.whiten = PreWhitener(x) #TODO : 이거 x 데이터 처리 후 들어가야함 수정 필요
-                    x = self.x_emb(cont, cat, _len, diff)
+                    x = self.x_emb(cont_p,cont_c, cat_p,cat_c, _len, diff)
+                    # x = self.x_emb(cont, cat, _len, diff)
                     x = self.transformer_encoder(x, _len)
                     # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
                     t = (t*6)
@@ -941,10 +970,12 @@ class CEVAE(nn.Module):
                     losses.append(loss)
         else:
             self.set_mode("train")
-            for cont, cat, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
+            for cont_p, cont_c, cat_p, cat_c, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
+            # for cont, cat, _len, yd, diff, t in tqdm(dataloader, desc="Batch", leave=False):
                 if False :        
                     self.whiten = PreWhitener(x) #TODO : 이거 x 데이터 처리 후 들어가야함 수정 필요
-                x = self.x_emb(cont, cat, _len, diff)
+                x = self.x_emb(cont_p,cont_c, cat_p,cat_c, _len, diff)
+                # x = self.x_emb(cont, cat, _len, diff)
                 x = self.transformer_encoder(x, _len)
                 # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
                 t = (t*6)
@@ -957,13 +988,14 @@ class CEVAE(nn.Module):
     def cal_yd_loss(self, dl, dataset, data_type):
         y_diffs = []
         d_diffs = []
-        for cont, cat, _len, yd, diff, t in dl:
-            x = self.x_emb(cont, cat, _len, diff)
+        for cont_p, cont_c, cat_p, cat_c, _len, yd, diff, t in dl:
+        # for cont, cat, _len, yd, diff, t in dl:
+            x = self.x_emb(cont_p,cont_c, cat_p,cat_c, _len, diff)
+            # x = self.x_emb(cont, cat, _len, diff)
             x = self.transformer_encoder(x, _len)
             # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
             t = (t*6)
-            y_hat = self.model.y_mean(x, t)
-            d_hat = self.model.d_mean(x, t) 
+            y_hat, d_hat = self.guide(x=x, t=t, mode="eval")
             y_ori_hat = utils.restore_minmax(y_hat, dataset.dataset.a_y, dataset.dataset.b_y)
             d_ori_hat = utils.restore_minmax(d_hat, dataset.dataset.a_d, dataset.dataset.b_d)
             y_original = utils.restore_minmax(yd[:, 0], dataset.dataset.a_y, dataset.dataset.b_y)

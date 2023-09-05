@@ -59,6 +59,7 @@ def main(args):
         generator = torch.Generator(device=device)
     else:
         device = 'cpu'
+        generator = torch.Generator(device=device)
     torch.device(device)
 
     ## Load Data --------------------------------------------------------------------------------
@@ -98,7 +99,8 @@ def main(args):
         num_layers=args.num_layers,
         num_samples=10,
         outcome_dist='normal',
-        ignore_wandb=args.ignore_wandb
+        ignore_wandb=args.ignore_wandb,
+        lamdas=[args.lambda1, args.lambda2, args.lambda3]
     )
 
     cevae.fit(
@@ -115,45 +117,45 @@ def main(args):
 
     #-------------------------------------------------------------------------------------
     # Evaluate.
-    y_diffs = []
-    d_diffs = []
-    dl = DataLoader(test_dataset, batch_size=16)
-    # whiten = PreWhitener(x_test)
-    with tqdm(initial = 0, total = len(dl)) as pbar:
-        with torch.no_grad():
-            pbar.set_description('calculating loss')
-            for cont, cat, _len, yd, diff, t in dl:
-                x = cevae.x_emb(cont, cat, _len, diff)
-                x = cevae.transformer_encoder(x, _len)
-                # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
-                t = (t*6)
-                y_hat = cevae.model.y_mean(x, t)
-                d_hat = cevae.model.d_mean(x, t) 
-                y_ori_hat = utils.restore_minmax(y_hat, test_dataset.dataset.a_y, test_dataset.dataset.b_y)
-                d_ori_hat = utils.restore_minmax(d_hat, test_dataset.dataset.a_d, test_dataset.dataset.b_d)
-                y_original = utils.restore_minmax(yd[:, 0], test_dataset.dataset.a_y, test_dataset.dataset.b_y)
-                d_original = utils.restore_minmax(yd[:, 1], test_dataset.dataset.a_d, test_dataset.dataset.b_d)
+    # y_diffs = []
+    # d_diffs = []
+    # dl = DataLoader(test_dataset, batch_size=16)
+    # # whiten = PreWhitener(x_test)
+    # with tqdm(initial = 0, total = len(dl)) as pbar:
+    #     with torch.no_grad():
+    #         pbar.set_description('calculating loss')
+    #         for cont, cat, _len, yd, diff, t in dl:
+    #             x = cevae.x_emb(cont, cat, _len, diff)
+    #             x = cevae.transformer_encoder(x, _len)
+    #             # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
+    #             t = (t*6)
+    #             y_hat = cevae.model.y_mean(x, t)
+    #             d_hat = cevae.model.d_mean(x, t) 
+    #             y_ori_hat = utils.restore_minmax(y_hat, test_dataset.dataset.a_y, test_dataset.dataset.b_y)
+    #             d_ori_hat = utils.restore_minmax(d_hat, test_dataset.dataset.a_d, test_dataset.dataset.b_d)
+    #             y_original = utils.restore_minmax(yd[:, 0], test_dataset.dataset.a_y, test_dataset.dataset.b_y)
+    #             d_original = utils.restore_minmax(yd[:, 1], test_dataset.dataset.a_d, test_dataset.dataset.b_d)
                 
-                y_diffs.append(y_original - y_ori_hat)
-                d_diffs.append(d_original - d_ori_hat)
-            pbar.update(1)
+    #             y_diffs.append(y_original - y_ori_hat)
+    #             d_diffs.append(d_original - d_ori_hat)
+    #         pbar.update(1)
     
-    y_diffs_tensor = torch.cat(y_diffs)
-    d_diffs_tensor = torch.cat(d_diffs)
+    # y_diffs_tensor = torch.cat(y_diffs)
+    # d_diffs_tensor = torch.cat(d_diffs)
 
-    y_mae = torch.mean(torch.abs(y_diffs_tensor))
-    y_rmse = torch.sqrt(torch.mean(y_diffs_tensor ** 2))
+    # y_mae = torch.mean(torch.abs(y_diffs_tensor))
+    # y_rmse = torch.sqrt(torch.mean(y_diffs_tensor ** 2))
 
-    d_mae = torch.mean(torch.abs(d_diffs_tensor))
-    d_rmse = torch.sqrt(torch.mean(d_diffs_tensor ** 2))
-    df = pd.DataFrame({
-    'Metrics': ['MAE', 'RMSE'],
-    'Y-values': [0, 0],
-    'D-values': [0, 0]
-    })
-    df['Y-values'] = [y_mae.item(), y_rmse.item()]
-    df['D-values'] = [d_mae.item(), d_rmse.item()]
-    display(df)
+    # d_mae = torch.mean(torch.abs(d_diffs_tensor))
+    # d_rmse = torch.sqrt(torch.mean(d_diffs_tensor ** 2))
+    # df = pd.DataFrame({
+    # 'Metrics': ['MAE', 'RMSE'],
+    # 'Y-values': [0, 0],
+    # 'D-values': [0, 0]
+    # })
+    # df['Y-values'] = [y_mae.item(), y_rmse.item()]
+    # df['D-values'] = [d_mae.item(), d_rmse.item()]
+    # display(df)
 
     # naive_ate_y = y_test[t_test == 1].mean() - y_test[t_test == 0].mean()
     # naive_ate_d = d_test[t_test == 1].mean() - d_test[t_test == 0].mean()
@@ -177,6 +179,9 @@ def parse_args():
     parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
     parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
     parser.add_argument("--weight-decay", default=1e-4, type=float)
+    parser.add_argument("--lambda1", default=1e-1, type=float)
+    parser.add_argument("--lambda2", default=1e-2, type=float)
+    parser.add_argument("--lambda3", default=1e-3, type=float)
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--jit", action="store_true")
     parser.add_argument("--device", default="cuda", type=str)
