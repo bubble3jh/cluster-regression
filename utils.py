@@ -14,7 +14,7 @@ from torch.utils.data import Dataset
 
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
-    def __init__(self, data, scale='minmax', use_treatment=False):
+    def __init__(self, args, data, scale='minmax', use_treatment=False):
         self.use_treatment = use_treatment
         # padding tensors
         self.diff_tensor = torch.zeros([124,1])
@@ -54,7 +54,17 @@ class Tabledata(Dataset):
             self.cont_X = data.iloc[:, 1:6].values.astype('float32')
         self.cat_X = data.iloc[:, 6:13].astype('category')
         self.diff_days = data.iloc[:, 13].values.astype('float32')
-        self.y = yd.values.astype('float32')
+
+        # y label tukey transformation
+        # self.y = yd.values.astype('float32')
+        y = torch.tensor(yd['y'].values.astype('float32'))
+        d = torch.tensor(yd['d'].values.astype('float32'))
+        
+        y = tukey_transformation(y, args)
+        d = tukey_transformation(d, args)
+        
+        self.y = torch.stack([y, d], dim=1)
+
         # 이산 데이터 정렬 및 저장#
         self.cat_cols = self.cat_X.columns
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
@@ -88,7 +98,7 @@ class Tabledata(Dataset):
         cat_tensor_c = cat_tensor[:, 5:]
         cont_tensor_p = cont_tensor[:, :3]
         cont_tensor_c = cont_tensor[:, 3:]
-        y = torch.tensor(self.y[index])
+        y = self.y[index]
         if not self.use_treatment:
             return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor
         else:
@@ -323,3 +333,37 @@ def reduction_cluster(x, diff_days, len, reduction):
         cluster.append(non_padded_cluster)
 
     return torch.stack(cluster, dim=0)
+
+### Tukey transformation
+def tukey_transformation(data, args):
+    epsilon = 1e-8  
+    
+    if args.tukey:
+        data[data == 0] = epsilon
+        if args.beta != 0:
+            data = torch.pow(data, args.beta)
+        elif args.beta == 0:
+            data = torch.log(data)
+        else:
+            data = (-1) * torch.pow(data, args.beta)
+        data[torch.isnan(data)] = 0.0
+        
+    return data
+
+def inverse_tukey_transformation(data, args):
+    epsilon = 1e-8
+    
+    if args.tukey:
+        # Handle NaNs (these would have been zeros in the original data)
+        data[torch.isnan(data)] = 0.0
+
+        # Inverse transform based on beta
+        if args.beta != 0:
+            data = torch.pow(data, 1 / args.beta)
+        elif args.beta == 0:
+            data = torch.exp(data)
+        
+        # Restore zeros (these were converted to epsilon in the original data)
+        data[torch.abs(data - epsilon) < 1e-8] = 0.0
+    
+    return data

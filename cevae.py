@@ -67,7 +67,7 @@ def main(args):
     args.scaling='minmax'
     data = pd.read_csv(args.data_path+f"data_cut_{0}.csv")
     # dataset = utils.CEVAEdataset(data, args.scaling, t_type)
-    dataset = utils.Tabledata(data, scale="minmax", use_treatment=True)
+    dataset = utils.Tabledata(args, data, scale="minmax", use_treatment=True)
     train_dataset, val_dataset, test_dataset = random_split(dataset, [int(0.8 * len(dataset)), int(0.1 * len(dataset)), len(dataset) - int(0.8 * len(dataset)) - int(0.1 * len(dataset))], generator=generator)
     # x, y, t = dataset.get_data()
     # x = x.to(device); y = y.to(device).float(); t = t.to(device).float()
@@ -113,6 +113,7 @@ def main(args):
         learning_rate=args.learning_rate,
         learning_rate_decay=args.learning_rate_decay,
         weight_decay=args.weight_decay,
+        args=args
     )
     print("Successfully trained model!")
 
@@ -184,6 +185,8 @@ def parse_args():
     parser.add_argument("--lambda2", default=1e-2, type=float)
     parser.add_argument("--lambda3", default=1e-3, type=float)
     parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument('--tukey', action='store_false', help='Use tukey transformation to get divergence')
+    parser.add_argument('--beta', type=float, default=0.5, help='parameter for Tukey transformation (Default : 0.5)')
     parser.add_argument("--jit", action="store_true")
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--use_default", action='store_true', help="Use default cevae file (Default : False)")
