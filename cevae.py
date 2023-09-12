@@ -100,7 +100,8 @@ def main(args):
         num_samples=10,
         outcome_dist='normal',
         ignore_wandb=args.ignore_wandb,
-        lamdas=[args.lambda1, args.lambda2, args.lambda3]
+        lambdas=[args.lambda1, args.lambda2, args.lambda3],
+        args=args
     )
 
     cevae.fit(

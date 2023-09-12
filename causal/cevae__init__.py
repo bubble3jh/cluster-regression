@@ -746,7 +746,8 @@ class CEVAE(nn.Module):
         num_layers=3,
         num_samples=100,
         ignore_wandb=False,
-        lambdas=None
+        lambdas=None,
+        args=None
     ):
         self.lambdas = lambdas
         self.ignore_wandb=ignore_wandb
@@ -759,6 +760,7 @@ class CEVAE(nn.Module):
         )
         if not ignore_wandb:
             wandb.init(entity="mlai_medical_ai" ,project="causal-effect-vae", config=config)
+            wandb.run.name=f"cevae_lambda1_{lambdas[0]}_lambda2_{lambdas[1]}_lambda3_{lambdas[2]}_lr_{args.learning_rate}_lrd_{args.learning_rate_decay}_wd_{args.weight_decay}"
         for name, size in config.items():
             if not (isinstance(size, int) and size > 0):
                 raise ValueError("Expected {} > 0 but got {}".format(name, size))
