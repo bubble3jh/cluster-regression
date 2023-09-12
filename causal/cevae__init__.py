@@ -759,7 +759,7 @@ class CEVAE(nn.Module):
             num_samples=num_samples,
         )
         if not ignore_wandb:
-            wandb.init(entity="mlai_medical_ai" ,project="causal-effect-vae", config=config)
+            wandb.init(entity="mlai_medical_ai" ,project="causal-effect-vae", config=args)
             wandb.run.name=f"cevae_lambda1_{lambdas[0]}_lambda2_{lambdas[1]}_lambda3_{lambdas[2]}_lr_{args.learning_rate}_lrd_{args.learning_rate_decay}_wd_{args.weight_decay}_beta_{args.beta}"
         for name, size in config.items():
             if not (isinstance(size, int) and size > 0):
@@ -786,6 +786,7 @@ class CEVAE(nn.Module):
         learning_rate_decay=0.1,
         weight_decay=1e-4,
         log_every=1,
+        args=None
     ):
         """
         Train using :class:`~pyro.infer.svi.SVI` with the
@@ -852,9 +853,9 @@ class CEVAE(nn.Module):
                 val_epoch_loss = self.cal_svi_loss(valid_dataloader, valid_dataset, svi, eval=True)
                 test_epoch_loss = self.cal_svi_loss(test_dataloader, test_dataset, svi, eval=True)
                 train_losses= train_losses + train_epoch_loss; val_losses = val_losses + val_epoch_loss; test_losses = test_losses + test_epoch_loss
-                train_metrics = self.cal_yd_loss(train_dataloader, train_dataset, data_type="train")
-                val_metrics = self.cal_yd_loss(valid_dataloader, valid_dataset, data_type="val")
-                test_metrics = self.cal_yd_loss(test_dataloader, test_dataset, data_type="test")
+                train_metrics = self.cal_yd_loss(train_dataloader, train_dataset, data_type="train", args=args)
+                val_metrics = self.cal_yd_loss(valid_dataloader, valid_dataset, data_type="val", args=args)
+                test_metrics = self.cal_yd_loss(test_dataloader, test_dataset, data_type="test", args=args)
 
                 val_mae_sum = val_metrics['val_y_mae'] + val_metrics['val_d_mae']
 
@@ -987,7 +988,7 @@ class CEVAE(nn.Module):
         return losses
     
     @torch.no_grad()
-    def cal_yd_loss(self, dl, dataset, data_type):
+    def cal_yd_loss(self, dl, dataset, data_type, args):
         y_diffs = []
         d_diffs = []
         for cont_p, cont_c, cat_p, cat_c, _len, yd, diff, t in dl:
@@ -998,13 +999,18 @@ class CEVAE(nn.Module):
             # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
             t = (t*6)
             y_hat, d_hat = self.guide(x=x, t=t, mode="eval")
-            y_ori_hat = utils.restore_minmax(y_hat, dataset.dataset.a_y, dataset.dataset.b_y)
-            d_ori_hat = utils.restore_minmax(d_hat, dataset.dataset.a_d, dataset.dataset.b_d)
-            y_original = utils.restore_minmax(yd[:, 0], dataset.dataset.a_y, dataset.dataset.b_y)
-            d_original = utils.restore_minmax(yd[:, 1], dataset.dataset.a_d, dataset.dataset.b_d)
+            y_hat = utils.inverse_tukey_transformation(y_hat, args=args)
+            d_hat = utils.inverse_tukey_transformation(d_hat, args=args)
+            y_ori = utils.inverse_tukey_transformation(yd[:, 0], args=args)
+            d_ori = utils.inverse_tukey_transformation(yd[:, 1], args=args)
+
+            y_hat = utils.restore_minmax(y_hat, dataset.dataset.a_y, dataset.dataset.b_y)
+            d_hat = utils.restore_minmax(d_hat, dataset.dataset.a_d, dataset.dataset.b_d)
+            y_ori = utils.restore_minmax(y_ori, dataset.dataset.a_y, dataset.dataset.b_y)
+            d_ori = utils.restore_minmax(d_ori, dataset.dataset.a_d, dataset.dataset.b_d)
             
-            y_diffs.append(y_original - y_ori_hat)
-            d_diffs.append(d_original - d_ori_hat)
+            y_diffs.append(y_ori - y_hat)
+            d_diffs.append(d_ori - d_hat)
     
         y_diffs_tensor = torch.cat(y_diffs)
         d_diffs_tensor = torch.cat(d_diffs)
@@ -1018,7 +1024,9 @@ class CEVAE(nn.Module):
             f'{data_type}_y_mae': y_mae,
             f'{data_type}_y_rmse': y_rmse,
             f'{data_type}_d_mae': d_mae,
-            f'{data_type}_d_rmse': d_rmse
+            f'{data_type}_d_rmse': d_rmse,
+            f'{data_type}_tot_mae': y_mae+d_mae,
+            f'{data_type}_tot_rmse': y_rmse+d_rmse
         }
         return metrics
     

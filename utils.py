@@ -349,3 +349,21 @@ def tukey_transformation(data, args):
         data[torch.isnan(data)] = 0.0
         
     return data
+
+def inverse_tukey_transformation(data, args):
+    epsilon = 1e-8
+    
+    if args.tukey:
+        # Handle NaNs (these would have been zeros in the original data)
+        data[torch.isnan(data)] = 0.0
+
+        # Inverse transform based on beta
+        if args.beta != 0:
+            data = torch.pow(data, 1 / args.beta)
+        elif args.beta == 0:
+            data = torch.exp(data)
+        
+        # Restore zeros (these were converted to epsilon in the original data)
+        data[torch.abs(data - epsilon) < 1e-8] = 0.0
+    
+    return data

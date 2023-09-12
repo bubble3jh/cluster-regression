@@ -35,9 +35,11 @@ print(f"Best Run ID: {best_run.name}")
 print(f"Created At: {best_run.created_at}")
 print("Other values:")
 for key, value in best_run.summary.items():
-    if key in ['best_test_ceelbo_loss', 'best_test_d_mae_loss', 'best_test_d_rmse_loss', 'best_test_y_mae_loss', 'best_test_y_rmse_loss', 'best_train_ceelbo_loss', 'best_train_d_mae_loss', 'best_train_d_rmse_loss', 'best_train_y_mae_loss', 'best_train_y_rmse_loss', 'best_val_ceelbo_loss', 'best_val_d_mae_loss', 'best_val_d_rmse_loss', 'best_val_y_mae_loss', 'best_val_y_rmse_loss']:
+    if key in [ 'best_test_d_mae_loss', 'best_test_d_rmse_loss', 'best_test_y_mae_loss', 'best_test_y_rmse_loss']:
         print(f"{key}: {value:.4f}")
-    # print(f"{key}: {value}")
+    # if key in ['best_test_ceelbo_loss', 'best_test_d_mae_loss', 'best_test_d_rmse_loss', 'best_test_y_mae_loss', 'best_test_y_rmse_loss', 'best_train_ceelbo_loss', 'best_train_d_mae_loss', 'best_train_d_rmse_loss', 'best_train_y_mae_loss', 'best_train_y_rmse_loss', 'best_val_ceelbo_loss', 'best_val_d_mae_loss', 'best_val_d_rmse_loss', 'best_val_y_mae_loss', 'best_val_y_rmse_loss']:
+    #     print(f"{key}: {value:.4f}")
+    # # print(f"{key}: {value}")
 print("\n")
 # # 해당 run의 config 값을 테이블 형태로 출력합니다.
 print("\nBest Run Config:")

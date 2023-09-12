@@ -113,6 +113,7 @@ def main(args):
         learning_rate=args.learning_rate,
         learning_rate_decay=args.learning_rate_decay,
         weight_decay=args.weight_decay,
+        args=args
     )
     print("Successfully trained model!")
 
