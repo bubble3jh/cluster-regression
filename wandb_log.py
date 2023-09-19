@@ -1,4 +1,5 @@
 import wandb
+import math
 from datetime import datetime
 
 wandb.login()
@@ -9,7 +10,7 @@ entity_name = "mlai_medical_ai"
 # WandB API 객체 생성
 api = wandb.Api()
 
-timestamp_threshold = datetime.fromisoformat('2023-09-06T00:00:00+00:00').timestamp()
+timestamp_threshold = datetime.fromisoformat('2023-09-12T00:00:00+00:00').timestamp()
 # 프로젝트의 모든 실행을 불러옴
 runs = api.runs(f"{entity_name}/{project_name}")
 # 각 실행에서 특정 두 값의 합을 계산하고 저장
@@ -20,9 +21,10 @@ for run in runs:
         if run.state in ['finished', 'success']:
             created_at = datetime.fromisoformat(run.created_at.replace("Z", "+00:00")).timestamp()  # created_at을 Unix timestamp로 변환
             if created_at > timestamp_threshold:
-                metric1 = run.summary.get("best_val_d_mae_loss", 0)
-                metric2 = run.summary.get("best_val_y_mae_loss", 0)
-                run_sums.append((run, metric1 + metric2))
+                metric1 = run.summary.get("best_val_d_mae_loss", None)
+                metric2 = run.summary.get("best_val_y_mae_loss", None)
+                if metric1 is not None and metric2 is not None and not (math.isnan(metric1) or math.isnan(metric2)):
+                    run_sums.append((run, metric1 + metric2))
 
 # 합이 가장 낮은 순으로 정렬
 sorted_runs = sorted(run_sums, key=lambda x: x[1])
@@ -39,7 +41,7 @@ for key, value in best_run.summary.items():
         print(f"{key}: {value:.4f}")
     # if key in ['best_test_ceelbo_loss', 'best_test_d_mae_loss', 'best_test_d_rmse_loss', 'best_test_y_mae_loss', 'best_test_y_rmse_loss', 'best_train_ceelbo_loss', 'best_train_d_mae_loss', 'best_train_d_rmse_loss', 'best_train_y_mae_loss', 'best_train_y_rmse_loss', 'best_val_ceelbo_loss', 'best_val_d_mae_loss', 'best_val_d_rmse_loss', 'best_val_y_mae_loss', 'best_val_y_rmse_loss']:
     #     print(f"{key}: {value:.4f}")
-    # # print(f"{key}: {value}")
+    # print(f"{key}: {value}")
 print("\n")
 # # 해당 run의 config 값을 테이블 형태로 출력합니다.
 print("\nBest Run Config:")

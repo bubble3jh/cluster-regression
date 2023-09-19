@@ -11,12 +11,15 @@ do
     do
       for learning_rate in 1e-2 1e-3 1e-4
       do
+      for beta in -0.5 0 0.5 1.5
+      do
           # 현재 GPU ID 선택
           CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} cevae.py \
           --learning_rate ${learning_rate} \
           --lambda1 ${lambda1} \
           --lambda2 ${lambda2} \
           --lambda3 ${lambda3} \
+          --beta ${beta} \
           --num_epochs ${num_epochs}
           
           # GPU ID를 다음 것으로 변경
@@ -26,6 +29,7 @@ do
           if [ $IDX -eq 0 ]; then
             wait
           fi
+    done
     done
   done
 done
