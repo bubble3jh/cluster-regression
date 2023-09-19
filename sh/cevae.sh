@@ -21,6 +21,8 @@ do
           --lambda3 ${lambda3} \
           --beta ${beta} \
           --num_epochs ${num_epochs} &
+          --beta ${beta} \
+          --num_epochs ${num_epochs}
           
           # GPU ID를 다음 것으로 변경
           IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))

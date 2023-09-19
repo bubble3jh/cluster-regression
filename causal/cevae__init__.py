@@ -683,10 +683,10 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
             model_trace, blocked_guide_trace
         )
         # Add log q terms. \
-        for i, name in enumerate(blocked_names): #for 문에서 lambdas 추가?
+        for i, name in enumerate(blocked_names): #for 문에서 lambdas 추가
             log_q = guide_trace.nodes[name]["log_prob_sum"]
             loss = loss - torch_item(log_q) * self.lambdas[i]
-            surrogate_loss = surrogate_loss - log_q
+            surrogate_loss = surrogate_loss - log_q * self.lambdas[i]
 
         return loss, surrogate_loss
 
