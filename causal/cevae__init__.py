@@ -748,8 +748,6 @@ class CEVAE(nn.Module):
         ignore_wandb=False,
         lambdas=None,
         args=None
-        lambdas=None,
-        args=None
     ):
         self.lambdas = lambdas
         self.ignore_wandb=ignore_wandb
