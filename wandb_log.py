@@ -10,7 +10,8 @@ entity_name = "mlai_medical_ai"
 # WandB API 객체 생성
 api = wandb.Api()
 
-timestamp_threshold = datetime.fromisoformat('2023-09-12T00:00:00+00:00').timestamp()
+timestamp_threshold = datetime.fromisoformat('2023-09-18T00:00:00+00:00').timestamp()
+# timestamp_upper = datetime.fromisoformat('2023-09-18T00:00:00+00:00').timestamp()
 # 프로젝트의 모든 실행을 불러옴
 runs = api.runs(f"{entity_name}/{project_name}")
 # 각 실행에서 특정 두 값의 합을 계산하고 저장
@@ -19,8 +20,11 @@ run_sums = []
 for run in runs:
     if isinstance(run, wandb.apis.public.Run):
         if run.state in ['finished', 'success']:
+            elbo_lambda1 = run.config.get("elbo_lambda1", None)
+            lambda1 = run.config.get("lambda1", None)
             created_at = datetime.fromisoformat(run.created_at.replace("Z", "+00:00")).timestamp()  # created_at을 Unix timestamp로 변환
-            if created_at > timestamp_threshold:
+            # if timestamp_upper > created_at > timestamp_threshold:
+            if created_at > timestamp_threshold and elbo_lambda1 == 1 and lambda1 == 1:
                 metric1 = run.summary.get("best_val_d_mae_loss", None)
                 metric2 = run.summary.get("best_val_y_mae_loss", None)
                 if metric1 is not None and metric2 is not None and not (math.isnan(metric1) or math.isnan(metric2)):

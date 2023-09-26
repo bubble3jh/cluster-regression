@@ -101,6 +101,7 @@ def main(args):
         outcome_dist='normal',
         ignore_wandb=args.ignore_wandb,
         lambdas=[args.lambda1, args.lambda2, args.lambda3],
+        elbo_lambdas=[args.elbo_lambda1, args.elbo_lambda2, args.elbo_lambda3, args.elbo_lambda4, args.elbo_lambda5],
         args=args
     )
 
@@ -172,19 +173,26 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Hyperparameters Configuration")
-    parser.add_argument("--feature_dim", default=128, type=int)
-    parser.add_argument("--latent_dim", default=20, type=int)
-    parser.add_argument("--hidden_dim", default=200, type=int)
+    parser.add_argument("--feature_dim", default=32, type=int)
+    parser.add_argument("--latent_dim", default=16, type=int)
+    parser.add_argument("--hidden_dim", default=32, type=int)
     parser.add_argument("--num-layers", default=3, type=int)
     parser.add_argument("-n", "--num_epochs", default=100, type=int)
     parser.add_argument("-b", "--batch_size", default=32, type=int)
     parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
     parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
     parser.add_argument("--weight-decay", default=1e-4, type=float)
-    parser.add_argument("--lambda1", default=1e-1, type=float)
-    parser.add_argument("--lambda2", default=1e-2, type=float)
-    parser.add_argument("--lambda3", default=1e-3, type=float)
+    parser.add_argument("--lambda1", default=1, type=float, help='additional q loss for t')
+    parser.add_argument("--lambda2", default=1, type=float, help='additional q loss for y')
+    parser.add_argument("--lambda3", default=1, type=float, help='additional q loss for d')
+    parser.add_argument("--elbo_lambda1", default=1, type=float, help='ELBO P loss for z')
+    parser.add_argument("--elbo_lambda2", default=1, type=float, help='ELBO P loss for x')
+    parser.add_argument("--elbo_lambda3", default=1, type=float, help='ELBO P loss for t')
+    parser.add_argument("--elbo_lambda4", default=1, type=float, help='ELBO P loss for y')
+    parser.add_argument("--elbo_lambda5", default=1, type=float, help='ELBO P loss for d')
     parser.add_argument("--seed", default=0, type=int)
+    parser.add_argument("--sweep_group", default="default", type=str)
+    parser.add_argument("--eval_model", default="decoder", type=str)
     parser.add_argument('--tukey', action='store_false', help='Use tukey transformation to get divergence')
     parser.add_argument('--beta', type=float, default=0.5, help='parameter for Tukey transformation (Default : 0.5)')
     parser.add_argument("--jit", action="store_true")

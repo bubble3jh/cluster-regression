@@ -30,7 +30,8 @@ from tqdm import tqdm
 import pyro
 import pyro.distributions as dist
 from pyro import poutine
-from pyro.infer import SVI, Trace_ELBO
+from pyro.infer import SVI
+from causal.trace_elbo_local import Trace_ELBO
 from pyro.infer.util import torch_item
 from pyro.nn import PyroModule
 from pyro.optim import ClippedAdam
@@ -377,16 +378,20 @@ class Model(PyroModule):
         self.t_nn = MultinormNet([config["latent_dim"]])
         # self.t_nn = BernoulliNet([config["latent_dim"]])
 
-    def forward(self, x, t=None, y=None, d=None, size=None):
-        if size is None:
-            size = x.size(0)
-        with pyro.plate("data", size, subsample=x):
-            z = pyro.sample("z", self.z_dist())
-            x = pyro.sample("x", self.x_dist(z), obs=x)
-            t = pyro.sample("t", self.t_dist(z), obs=t)
-            y = pyro.sample("y", self.y_dist(t, z), obs=y)
-            d = pyro.sample("d", self.d_dist(t, z), obs=d)
-        return y,d # svi.step에서는 안쓴다..?
+    def forward(self, x=None, t=None, y=None, d=None, size=None, mode=None, z=None):
+        if mode != "mae":
+            if size is None:
+                size = x.size(0)
+            with pyro.plate("data", size, subsample=x):
+                z = pyro.sample("z", self.z_dist())
+                x = pyro.sample("x", self.x_dist(z), obs=x)
+                t = pyro.sample("t", self.t_dist(z), obs=t)
+                y = pyro.sample("y", self.y_dist(t, z), obs=y)
+                d = pyro.sample("d", self.d_dist(t, z), obs=d)
+        else:
+            y = self.y_dist(t, z).mean
+            d = self.d_dist(t, z).mean
+            return y,d # svi.step에서는 안쓴다..!
 
     def y_mean(self, x, t=None):
         with pyro.plate("data", x.size(0)):
@@ -550,9 +555,13 @@ class Guide(PyroModule):
         self.z6_nn = DiagNormalNet([config["hidden_dim"], config["latent_dim"]])
 
     def forward(self, x, t=None, y=None, d=None, size=None, mode=None):
-        if size is None:
-            size = x.size(0)
-        if mode != "eval":
+        if mode == "enc_out":
+            y = self.y_dist(t, x).mean
+            d = self.d_dist(t, x).mean
+            return y, d
+        else:
+            if size is None:
+                size = x.size(0)
             with pyro.plate("data", size, subsample=x):
                 # The t and y sites are needed for prediction, and participate in
                 # the auxiliary CEVAE loss. We mark them auxiliary to indicate they
@@ -561,11 +570,8 @@ class Guide(PyroModule):
                 y = pyro.sample("y", self.y_dist(t, x), obs=y, infer={"is_auxiliary": True})
                 d = pyro.sample("d", self.d_dist(t, x), obs=d, infer={"is_auxiliary": True})
                 # The z site participates only in the usual ELBO loss.
-                pyro.sample("z", self.z_dist(y, d, t, x))
-        else :
-            y = self.y_dist(t, x).mean
-            d = self.d_dist(t, x).mean
-            return y, d
+                z = pyro.sample("z", self.z_dist(y, d, t, x))
+                return z
 
     def t_dist(self, x):
         (logits,) = self.t_nn(x)
@@ -665,9 +671,10 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
 
         -loss = ELBO + log q(t|x) + log q(y|t,x)
     """
-    def __init__(self, lambdas, *args, **kwargs):
+    def __init__(self, lambdas, elbo_lambdas, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.lambdas = lambdas
+        self.elbo_lambdas = elbo_lambdas
 
     def _differentiable_loss_particle(self, model_trace, guide_trace):
         # Construct -ELBO part.
@@ -680,10 +687,11 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
         for name in blocked_names:
             del blocked_guide_trace.nodes[name]
         loss, surrogate_loss = super()._differentiable_loss_particle(
-            model_trace, blocked_guide_trace
+            model_trace, blocked_guide_trace, self.elbo_lambdas
         )
         # Add log q terms. \
         for i, name in enumerate(blocked_names): #for 문에서 lambdas 추가
+            # print(name+"q loss") t y d
             log_q = guide_trace.nodes[name]["log_prob_sum"]
             loss = loss - torch_item(log_q) * self.lambdas[i]
             surrogate_loss = surrogate_loss - log_q * self.lambdas[i]
@@ -747,9 +755,11 @@ class CEVAE(nn.Module):
         num_samples=100,
         ignore_wandb=False,
         lambdas=None,
+        elbo_lambdas=None,
         args=None
     ):
         self.lambdas = lambdas
+        self.elbo_lambdas = elbo_lambdas
         self.ignore_wandb=ignore_wandb
         config = dict(
             feature_dim=feature_dim,
@@ -759,7 +769,7 @@ class CEVAE(nn.Module):
             num_samples=num_samples,
         )
         if not ignore_wandb:
-            wandb.init(entity="mlai_medical_ai" ,project="causal-effect-vae", config=args)
+            wandb.init(entity="mlai_medical_ai" ,project="causal-effect-vae", config=args, group=args.sweep_group)
             wandb.run.name=f"cevae_lambda1_{lambdas[0]}_lambda2_{lambdas[1]}_lambda3_{lambdas[2]}_lr_{args.learning_rate}_lrd_{args.learning_rate_decay}_wd_{args.weight_decay}_beta_{args.beta}"
         for name, size in config.items():
             if not (isinstance(size, int) and size > 0):
@@ -772,8 +782,8 @@ class CEVAE(nn.Module):
         self.model = Model(config)
         self.guide = Guide(config)
 
-        self.x_emb = CEVAEEmbedding()
-        self.transformer_encoder = CEVAETransformer(input_size=128, hidden_size=64, num_layers=3, num_heads=2, drop_out=0)
+        self.x_emb = CEVAEEmbedding(output_size=args.feature_dim)
+        self.transformer_encoder = CEVAETransformer(input_size=args.feature_dim, hidden_size=args.feature_dim//2, num_layers=3, num_heads=2, drop_out=0)
 
     def fit(
         self,
@@ -826,7 +836,7 @@ class CEVAE(nn.Module):
                 "lrd": learning_rate_decay ** (1 / num_steps),
             }
         )
-        svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO(lambdas=self.lambdas))
+        svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO(lambdas=self.lambdas, elbo_lambdas=self.elbo_lambdas))
         #--------------------------------------------------------------------
         # losses = []; dataloader=train_dataloader; dataset=train_dataset
         # for epoch in tqdm(range(num_epochs), desc="Epoch"):
@@ -885,6 +895,7 @@ class CEVAE(nn.Module):
                         wandb.run.summary["best_val_y_rmse_loss"] = val_metrics["val_y_rmse"]
                         wandb.run.summary["best_val_d_mae_loss"] = val_metrics["val_d_mae"]
                         wandb.run.summary["best_val_d_rmse_loss"] = val_metrics["val_d_rmse"]
+                        wandb.run.summary["best_val_tot_mae_loss"] = best_mae
 
                         wandb.run.summary["best_test_y_mae_loss"] = test_metrics["test_y_mae"]
                         wandb.run.summary["best_test_y_rmse_loss"] = test_metrics["test_y_rmse"]
@@ -998,7 +1009,12 @@ class CEVAE(nn.Module):
             x = self.transformer_encoder(x, _len)
             # x = self.whiten(x) #TODO : 이거 x 데이터 처리 후 들어가야함
             t = (t*6)
-            y_hat, d_hat = self.guide(x=x, t=t, mode="eval")
+            if args.eval_model=="encoder":
+                y_hat, d_hat = self.guide(x=x, t=t, mode="enc_out")
+            elif args.eval_model == "decoder":
+                z = self.guide(x=x, t=t)
+                y_hat, d_hat = self.model(z=z, t=t, mode="mae")
+
             y_hat = utils.inverse_tukey_transformation(y_hat, args=args)
             d_hat = utils.inverse_tukey_transformation(d_hat, args=args)
             y_ori = utils.inverse_tukey_transformation(yd[:, 0], args=args)
