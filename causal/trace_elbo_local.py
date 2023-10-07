@@ -83,6 +83,8 @@ class Trace_ELBO(ELBO):
         elbo_particle = 0
         surrogate_elbo_particle = 0
         log_r = None
+        self.p_lambdas = elbo_lambdas[:5]
+        self.q_lambda = self.elbo_lambdas[5]
         idx = 0
         # compute elbo and surrogate elbo
         for name, site in model_trace.nodes.items():
@@ -99,11 +101,11 @@ class Trace_ELBO(ELBO):
                 # print(name + " Q loss")
                 log_prob, score_function_term, entropy_term = site["score_parts"]
 
-                elbo_particle = elbo_particle - torch_item(site["log_prob_sum"])
+                elbo_particle = elbo_particle - torch_item(site["log_prob_sum"]) * self.q_lambda
 
                 if not is_identically_zero(entropy_term):
                     surrogate_elbo_particle = (
-                        surrogate_elbo_particle - entropy_term.sum()
+                        surrogate_elbo_particle - entropy_term.sum() * self.q_lambda
                     )
 
                 if not is_identically_zero(score_function_term):
@@ -111,7 +113,7 @@ class Trace_ELBO(ELBO):
                         log_r = _compute_log_r(model_trace, guide_trace)
                     site = log_r.sum_to(site["cond_indep_stack"])
                     surrogate_elbo_particle = (
-                        surrogate_elbo_particle + (site * score_function_term).sum()
+                        surrogate_elbo_particle + (site * score_function_term).sum() * self.q_lambda
                     )
 
         return -elbo_particle, -surrogate_elbo_particle

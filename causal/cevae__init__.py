@@ -41,6 +41,7 @@ from models import CEVAEEmbedding, CEVAETransformer
 import pandas as pd
 from IPython.display import display
 import wandb
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +84,28 @@ class DistributionNet(nn.Module):
         raise ValueError("dtype not supported: {}".format(dtype))
 
 
+# class MultinormNet(DistributionNet):
+
+#     def __init__(self, sizes, classes=7):
+#         assert len(sizes) >= 1
+#         super().__init__()
+#         self.fc = FullyConnected(sizes + [classes])
+
+#     def forward(self, x):
+#         logits = self.fc(x).clamp(min=-10, max=10)
+#         return (logits,)
+
+#     @staticmethod
+#     def make_dist(logits):
+#         return dist.Categorical(logits=logits)
+    
+
 class MultinormNet(DistributionNet):
 
-    def __init__(self, sizes, classes=7):
+    def __init__(self, sizes, classes=7, final_activation=None):
         assert len(sizes) >= 1
         super().__init__()
-        self.fc = FullyConnected(sizes + [classes])
+        self.fc = FullyConnected(sizes + [classes], final_activation=final_activation)
 
     def forward(self, x):
         logits = self.fc(x).clamp(min=-10, max=10)
@@ -97,6 +114,7 @@ class MultinormNet(DistributionNet):
     @staticmethod
     def make_dist(logits):
         return dist.Categorical(logits=logits)
+
 
 
 class BernoulliNet(DistributionNet):
@@ -375,7 +393,8 @@ class Model(PyroModule):
         self.d6_nn = OutcomeNet(
             [config["latent_dim"]] + [config["hidden_dim"]] * config["num_layers"]
         )
-        self.t_nn = MultinormNet([config["latent_dim"]])
+        self.t_nn = MultinormNet([config["latent_dim"]] + [config["hidden_dim"]] * (config["num_layers"] - 1),
+            final_activation=nn.ELU())
         # self.t_nn = BernoulliNet([config["latent_dim"]])
 
     def forward(self, x=None, t=None, y=None, d=None, size=None, mode=None, z=None):
@@ -510,7 +529,9 @@ class Guide(PyroModule):
 
         super().__init__()
         # self.t_nn = BernoulliNet([config["feature_dim"]])
-        self.t_nn = MultinormNet([config["feature_dim"]])
+        self.t_nn = MultinormNet([config["feature_dim"]] + [config["latent_dim"]] * (config["num_layers"] - 1),
+            final_activation=nn.ELU())
+
         # The y and z networks both follow an architecture where the first few
         # layers are shared for t in {0,1}, but the final layer is split
         # between the two t values.
@@ -671,10 +692,11 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
 
         -loss = ELBO + log q(t|x) + log q(y|t,x)
     """
-    def __init__(self, lambdas, elbo_lambdas, *args, **kwargs):
+    def __init__(self, lambdas, elbo_lambdas, additional_loss, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.lambdas = lambdas
         self.elbo_lambdas = elbo_lambdas
+        self.additional_loss = additional_loss
 
     def _differentiable_loss_particle(self, model_trace, guide_trace):
         # Construct -ELBO part.
@@ -689,13 +711,25 @@ class TraceCausalEffect_ELBO(Trace_ELBO):
         loss, surrogate_loss = super()._differentiable_loss_particle(
             model_trace, blocked_guide_trace, self.elbo_lambdas
         )
-        # Add log q terms. \
+        # Add log q terms. 
         for i, name in enumerate(blocked_names): #for 문에서 lambdas 추가
-            # print(name+"q loss") t y d
-            log_q = guide_trace.nodes[name]["log_prob_sum"]
-            loss = loss - torch_item(log_q) * self.lambdas[i]
-            surrogate_loss = surrogate_loss - log_q * self.lambdas[i]
-
+            if self.additional_loss == "log_likelihood":
+                # print(name+"q loss") t y d
+                log_q = guide_trace.nodes[name]["log_prob_sum"]
+                loss = loss - torch_item(log_q) * self.lambdas[i]
+                surrogate_loss = surrogate_loss - log_q * self.lambdas[i]
+            elif self.additional_loss == "mse": # print(name+"q loss") t y d
+                if name == 't':
+                    pred = guide_trace.nodes[name]["fn"].logits
+                    value = guide_trace.nodes[name]["value"].long()
+                    predictive_loss = F.cross_entropy(pred, value) # ce
+                else:
+                    pred = guide_trace.nodes[name]["fn"].mean
+                    value = guide_trace.nodes[name]["value"]
+                    predictive_loss = (pred - value) ** 2 # mse
+                    predictive_loss = predictive_loss.mean()
+                loss = loss + predictive_loss * self.lambdas[i]
+                surrogate_loss = surrogate_loss + predictive_loss * self.lambdas[i]
         return loss, surrogate_loss
 
     @torch.no_grad()
@@ -782,8 +816,8 @@ class CEVAE(nn.Module):
         self.model = Model(config)
         self.guide = Guide(config)
 
-        self.x_emb = CEVAEEmbedding(output_size=args.feature_dim)
-        self.transformer_encoder = CEVAETransformer(input_size=args.feature_dim, hidden_size=args.feature_dim//2, num_layers=3, num_heads=2, drop_out=0)
+        self.x_emb = CEVAEEmbedding(output_size=args.embedding_dim)
+        self.transformer_encoder = CEVAETransformer(input_size=args.embedding_dim, hidden_size=args.embedding_dim//2, num_layers=3, num_heads=2, drop_out=0)
 
     def fit(
         self,
@@ -836,7 +870,7 @@ class CEVAE(nn.Module):
                 "lrd": learning_rate_decay ** (1 / num_steps),
             }
         )
-        svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO(lambdas=self.lambdas, elbo_lambdas=self.elbo_lambdas))
+        svi = SVI(self.model, self.guide, optim, TraceCausalEffect_ELBO(lambdas=self.lambdas, elbo_lambdas=self.elbo_lambdas, additional_loss=args.additional_loss))
         #--------------------------------------------------------------------
         # losses = []; dataloader=train_dataloader; dataset=train_dataset
         # for epoch in tqdm(range(num_epochs), desc="Epoch"):
@@ -1000,8 +1034,12 @@ class CEVAE(nn.Module):
     
     @torch.no_grad()
     def cal_yd_loss(self, dl, dataset, data_type, args):
+        correct_predictions = 0
+        total_predictions = 0
+
         y_diffs = []
         d_diffs = []
+        t_losses = []
         for cont_p, cont_c, cat_p, cat_c, _len, yd, diff, t in dl:
         # for cont, cat, _len, yd, diff, t in dl:
             x = self.x_emb(cont_p,cont_c, cat_p,cat_c, _len, diff)
@@ -1011,10 +1049,12 @@ class CEVAE(nn.Module):
             t = (t*6)
             if args.eval_model=="encoder":
                 y_hat, d_hat = self.guide(x=x, t=t, mode="enc_out")
+                t_logits = self.guide.t_dist(x).logits
             elif args.eval_model == "decoder":
                 z = self.guide(x=x, t=t)
                 y_hat, d_hat = self.model(z=z, t=t, mode="mae")
-
+                t_logits = self.model.t_dist(z)
+                
             y_hat = utils.inverse_tukey_transformation(y_hat, args=args)
             d_hat = utils.inverse_tukey_transformation(d_hat, args=args)
             y_ori = utils.inverse_tukey_transformation(yd[:, 0], args=args)
@@ -1025,18 +1065,27 @@ class CEVAE(nn.Module):
             y_ori = utils.restore_minmax(y_ori, dataset.dataset.a_y, dataset.dataset.b_y)
             d_ori = utils.restore_minmax(d_ori, dataset.dataset.a_d, dataset.dataset.b_d)
             
+            predicted_class = torch.argmax(t_logits, dim=1)
+            correct_predictions += (predicted_class == t.long()).sum().item()
+            total_predictions += t.size(0)
+            t_loss = F.cross_entropy(t_logits, t.long())
+            t_losses.append(t_loss)
+
             y_diffs.append(y_ori - y_hat)
             d_diffs.append(d_ori - d_hat)
-    
+
+        t_accuracy = correct_predictions / total_predictions
         y_diffs_tensor = torch.cat(y_diffs)
         d_diffs_tensor = torch.cat(d_diffs)
-
+        t_ce_loss = sum(t_losses)/len(t_losses)
         y_mae = torch.mean(torch.abs(y_diffs_tensor))
         y_rmse = torch.sqrt(torch.mean(y_diffs_tensor ** 2))
 
         d_mae = torch.mean(torch.abs(d_diffs_tensor))
         d_rmse = torch.sqrt(torch.mean(d_diffs_tensor ** 2))
         metrics = {
+            f'{data_type}_t_acc': t_accuracy,
+            f'{data_type}_t_ce': t_ce_loss,
             f'{data_type}_y_mae': y_mae,
             f'{data_type}_y_rmse': y_rmse,
             f'{data_type}_d_mae': d_mae,

@@ -10,7 +10,7 @@ import pickle
 import random
 import math
 from torch.utils.data import Dataset
-
+from torch.distributions import Normal
 
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
@@ -59,9 +59,9 @@ class Tabledata(Dataset):
         # self.y = yd.values.astype('float32')
         y = torch.tensor(yd['y'].values.astype('float32'))
         d = torch.tensor(yd['d'].values.astype('float32'))
-        
-        y = tukey_transformation(y, args)
-        d = tukey_transformation(d, args)
+        if args.tukey:
+            y = tukey_transformation(y, args)
+            d = tukey_transformation(d, args)
         
         self.y = torch.stack([y, d], dim=1)
 
@@ -185,14 +185,19 @@ class RMSELoss(nn.Module):
 
 
 ## Train --------------------------------------------------------------------------------------
-def train(data, model, optimizer, criterion, lamb=0.0):
+def train(data, model, optimizer, criterion, aux_criterian=None, use_treatment=False, lamb=0.0):
     model.train()
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
     optimizer.zero_grad()
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-        
+    if use_treatment:
+        dis = rest[0]
+        x_reconstructed, z_mu, z_logvar, preds = out
+        enc_yd_pred, enc_t_pred = preds
+        out = enc_yd_pred# TODO 수정필요
     loss_d = criterion(out[:,0], y[:,0])
     loss_y = criterion(out[:,1], y[:,1])
+     # TODO: T criterian 추가 
     loss = loss_d + loss_y
     
     # Add Penalty term for ridge regression
@@ -208,11 +213,17 @@ def train(data, model, optimizer, criterion, lamb=0.0):
 
 ## Validation --------------------------------------------------------------------------------
 @torch.no_grad()
-def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
+def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
     model.eval()
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
-    out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
+    out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    if use_treatment:
+        dis = rest[0]
+        x_reconstructed, z_mu, z_logvar, preds = out
+        enc_yd_pred, enc_t_pred = preds
+        out = enc_yd_pred# TODO 수정필요
+
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
        
     loss_y = eval_criterion(pred_y, gt_y)
@@ -225,15 +236,21 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
 
 ## Test ----------------------------------------------------------------------------------------
 @torch.no_grad()
-def test(data, model, scaling, a_y, b_y, a_d, b_d):
+def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
     
     criterion_mae = nn.L1Loss(reduction="sum")
     criterion_rmse = nn.MSELoss(reduction="sum")
     
     model.eval()
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data_load(data)
+
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-    
+    if use_treatment:
+        dis = rest[0]
+        x_reconstructed, z_mu, z_logvar, preds = out
+        enc_yd_pred, enc_t_pred = preds
+        out = enc_yd_pred# TODO 수정필요
+        
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
     # MAE
     mae_y = criterion_mae(pred_y, gt_y)
@@ -249,9 +266,16 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d):
     else:
         return 0, batch_num, out, y
 
-def data_load(data):
-    cont_p,cont_c, cat_p, cat_c, len, y, diff_days = data
-    return cont_p.shape[0], cont_p.cuda(), cont_c.cuda(), cat_p.cuda(), cat_c.cuda(), len.cuda(), y.cuda(), diff_days.cuda()
+def data_load(data, use_treatment=False):
+    # Move all tensors in the data tuple to GPU at once
+    data = tuple(tensor.cuda() for tensor in data)
+    
+    if use_treatment:
+        cont_p, cont_c, cat_p, cat_c, len, y, diff_days, dis = data
+        return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days, dis
+    else:
+        cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data
+        return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days
 
 def reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d):
     '''
@@ -367,3 +391,15 @@ def inverse_tukey_transformation(data, args):
         data[torch.abs(data - epsilon) < 1e-8] = 0.0
     
     return data
+
+## for VAE
+def reparametrize(mu, logvar):
+    # Calculate standard deviation
+    std = torch.exp(0.5 * logvar)
+    
+    # Create a standard normal distribution
+    epsilon = Normal(torch.zeros_like(mu), torch.ones_like(std)).rsample()
+    
+    # Reparametrization trick
+    z = mu + epsilon * std
+    return z

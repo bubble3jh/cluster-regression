@@ -1,9 +1,9 @@
 #!/bin/bash
 
-GPU_IDS=(3 4 5 6)  # 사용할 GPU ID 리스트
+GPU_IDS=(4 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
 num_epochs=200
-sweep_group="make_transformer-like"
+sweep_group="make_overfit"
 for lambda1 in 1
 do
   for lambda2 in 1
@@ -16,19 +16,21 @@ do
     do
     for elbo_lambda3 in 0 
     do
-    for elbo_lambda4 in 0 1
+    for elbo_lambda4 in 0 
     do
-    for elbo_lambda5 in 0 1
+    for elbo_lambda5 in 0 
+    do
+    for elbo_lambda6 in 0 
     do
       for learning_rate in 1e-3
       do
-      for feature_dim in 32 # 16 48
+      for feature_dim in 32 128 256 512
       do
-      for num_layers in 4 # 2 3
+      for num_layers in 3 8 12
       do
       for beta in 0.5
       do
-      for eval_model in "decoder" #"encoder" # "decoder"
+      for eval_model in "encoder" # "decoder"
       do
           latent_dim=$((feature_dim / 2))
           # 현재 GPU ID 선택
@@ -42,6 +44,7 @@ do
           --elbo_lambda3 ${elbo_lambda3} \
           --elbo_lambda4 ${elbo_lambda4} \
           --elbo_lambda5 ${elbo_lambda5} \
+          --elbo_lambda6 ${elbo_lambda6} \
           --beta ${beta} \
           --sweep_group ${sweep_group} \
           --feature_dim ${feature_dim} \
@@ -49,7 +52,7 @@ do
           --hidden_dim ${feature_dim} \
           --num-layers ${num_layers} \
           --eval_model ${eval_model} \
-          --num_epochs ${num_epochs} &
+          --num_epochs ${num_epochs} 
           
           # GPU ID를 다음 것으로 변경
           IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
@@ -58,6 +61,7 @@ do
           if [ $IDX -eq 0 ]; then
             wait
           fi
+    done
     done
     done
     done
