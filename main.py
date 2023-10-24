@@ -276,7 +276,6 @@ if args.eval_model != None:
     model.load_state_dict(torch.load(args.eval_model)['state_dict'])
 
 for epoch in range(1, args.epochs + 1):
-    time_ep = time.time()
     lr = optimizer.param_groups[0]['lr']
     tr_epoch_loss_d = 0; tr_epoch_loss_y = 0; val_epoch_loss_d = 0; val_epoch_loss_y = 0; te_mae_epoch_loss_d = 0; te_mae_epoch_loss_y = 0; te_mse_epoch_loss_d = 0; te_mse_epoch_loss_y = 0
 
@@ -405,7 +404,7 @@ for epoch in range(1, args.epochs + 1):
 
     # print values
     values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d_list[args.table_idx], val_loss_y_list[args.table_idx], test_mae_d_list[args.table_idx], test_mae_y_list[args.table_idx], test_rmse_d_list[args.table_idx], test_rmse_y_list[args.table_idx], ]    
-    values.append(time.time() - time_ep)
+    
     table = tabulate.tabulate([values], headers=columns, tablefmt="simple", floatfmt="8.4f")
     if epoch % 20 == 0 or epoch == 1:
         table = table.split("\n")

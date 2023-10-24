@@ -11,7 +11,8 @@ import random
 import math
 from torch.utils.data import Dataset
 from torch.distributions import Normal
-
+from collections import defaultdict
+from prettytable import PrettyTable
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
     def __init__(self, args, data, scale='minmax', use_treatment=False):
@@ -185,29 +186,43 @@ class RMSELoss(nn.Module):
 
 
 ## Train --------------------------------------------------------------------------------------
-def train(data, model, optimizer, criterion, aux_criterian=None, use_treatment=False, lamb=0.0):
+def train(data, model, optimizer, criterion,  lamb=0.0, aux_criterion=None, use_treatment=False, eval_criterion = None, scaling="minmax",a_y=None, b_y=None, a_d=None, b_d=None, pred_model="enc"):
+    eval_loss_y = None; eval_loss_d=None
     model.train()
     optimizer.zero_grad()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
-        dis = rest[0]
-        x_reconstructed, z_mu, z_logvar, preds = out
-        enc_yd_pred, enc_t_pred = preds
-        out = enc_yd_pred# TODO 수정필요
-    loss_d = criterion(out[:,0], y[:,0])
-    loss_y = criterion(out[:,1], y[:,1])
-     # TODO: T criterian 추가 
-    loss = loss_d + loss_y
-    
+        t = rest[0]
+        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds = out
+        enc_yd_pred, enc_t_pred = enc_preds
+        dec_yd_pred, dec_t_pred = dec_preds
+        loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
+        (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
+        if True: # TODO: hardcode
+            loss_y = enc_loss_y
+            loss_d = enc_loss_d
+            out = enc_yd_pred
+        else:
+            loss_y = dec_loss_y
+            loss_d = dec_loss_d
+            out = dec_yd_pred
+    else:
+        loss_d = criterion(out[:,0], y[:,0])
+        loss_y = criterion(out[:,1], y[:,1])    
+        loss = loss_d + loss_y
+
+    if eval_criterion != None:
+        pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
+        eval_loss_y = eval_criterion(pred_y, gt_y)
+        eval_loss_d = eval_criterion(pred_d, gt_d)
     # Add Penalty term for ridge regression
     if lamb != 0.0:
         loss += lamb * torch.norm(model.linear1.weight, p=2)
-    
     if not torch.isnan(loss):
         loss.backward()
         optimizer.step()
-        return loss_d.item(), loss_y.item(), batch_num, out, y
+        return loss_d.item(), loss_y.item(), batch_num, out, y, eval_loss_y, eval_loss_d
     else:
         return 0, batch_num, out, y
 
@@ -219,10 +234,20 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
-        dis = rest[0]
-        x_reconstructed, z_mu, z_logvar, preds = out
-        enc_yd_pred, enc_t_pred = preds
-        out = enc_yd_pred# TODO 수정필요
+        t = rest[0]
+        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds = out
+        enc_yd_pred, enc_t_pred = enc_preds
+        dec_yd_pred, dec_t_pred = dec_preds
+        # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
+        # (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
+        if True: # TODO: hardcode
+            # loss_y = enc_loss_y
+            # loss_d = enc_loss_d
+            out = enc_yd_pred
+        else:
+            loss_y = dec_loss_y
+            loss_d = dec_loss_d
+            out = dec_yd_pred
 
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
        
@@ -246,10 +271,20 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
-        dis = rest[0]
-        x_reconstructed, z_mu, z_logvar, preds = out
-        enc_yd_pred, enc_t_pred = preds
-        out = enc_yd_pred# TODO 수정필요
+        t = rest[0]
+        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds = out
+        enc_yd_pred, enc_t_pred = enc_preds
+        dec_yd_pred, dec_t_pred = dec_preds
+        # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
+        # (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
+        if True: # TODO: hardcode
+            # loss_y = enc_loss_y
+            # loss_d = enc_loss_d
+            out = enc_yd_pred
+        else:
+            loss_y = dec_loss_y
+            loss_d = dec_loss_d
+            out = dec_yd_pred
         
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
     # MAE
@@ -265,6 +300,105 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
         return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), batch_num, out, y
     else:
         return 0, batch_num, out, y
+    
+@torch.no_grad()
+def estimate_counterfactuals(model, dataloader, use_treatment=True):
+    model.eval()  # Set the model to evaluation mode
+    all_counterfactual_differences = []
+
+    for data in dataloader:
+        batch_num, cont_p, cont_c, cat_p, cat_c, len_, y, diff_days, *rest = data_load(data, use_treatment)
+        
+        if use_treatment:
+            t_original = 6*rest[0].long()
+            batch_counterfactual_differences = []
+
+            # Get the original predictions
+            out_original = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t_original)
+            _, _, _, _, enc_preds_original, dec_preds_original = out_original # TODO:assume encoder output
+            pred_yd_original, _ = enc_preds_original
+            
+            for t_value in range(7):  # t values ranging from 0 to 6
+                t = torch.full_like(t_original, fill_value=t_value).long()  # Create a tensor with the new t value
+                out = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t)
+                _, _, _, _, enc_preds_intervene, dec_preds_intervene = out
+                pred_yd_intervene, _ = enc_preds_intervene
+                
+                # Compute the differences from the original predictions
+                diff_y = pred_yd_intervene[:, 0] - pred_yd_original[:, 0]
+                diff_d = pred_yd_intervene[:, 1] - pred_yd_original[:, 1]
+                
+                # Store the t value difference and the prediction differences
+                t_diff = t_value - t_original
+                differences_dict = {
+                    "t_diff": t_diff.cpu().numpy(),
+                    "diff_y": diff_y.cpu().numpy(),
+                    "diff_d": diff_d.cpu().numpy()
+                }
+                batch_counterfactual_differences.append(differences_dict)
+            
+            all_counterfactual_differences.append(batch_counterfactual_differences)
+        else:
+            raise ValueError("The use_treatment argument should be True for counterfactual estimation.")
+
+    return all_counterfactual_differences
+
+
+def organize_counterfactuals(all_counterfactual_differences):
+    organized_counterfactuals = defaultdict(lambda: {"diff_y": [], "diff_d": []})
+
+    for batch_counterfactual_differences in all_counterfactual_differences:
+        for differences_dict in batch_counterfactual_differences:
+            t_diff_values = differences_dict['t_diff']
+            diff_y_values = differences_dict['diff_y']
+            diff_d_values = differences_dict['diff_d']
+            
+            # Assuming all arrays have the same length
+            for i in range(len(t_diff_values)):
+                t_diff = t_diff_values[i]
+                key = f't_diff_{int(t_diff)}'
+                organized_counterfactuals[key]["diff_y"].append(diff_y_values[i])
+                organized_counterfactuals[key]["diff_d"].append(diff_d_values[i])
+    # Convert lists to numpy arrays for consistency
+    for key, value in organized_counterfactuals.items():
+        organized_counterfactuals[key]["diff_y"] = np.array(value["diff_y"])
+        organized_counterfactuals[key]["diff_d"] = np.array(value["diff_d"])
+
+    return organized_counterfactuals
+
+def compute_average_differences(organized_counterfactuals):
+    average_differences = {}
+
+    for t_diff_key, values in organized_counterfactuals.items():
+        diff_y_avg = np.mean(values['diff_y'])
+        diff_d_avg = np.mean(values['diff_d'])
+
+        average_differences[t_diff_key] = {
+            "avg_diff_y": diff_y_avg,
+            "avg_diff_d": diff_d_avg
+        }
+    
+    return average_differences
+
+def print_average_differences(average_differences):
+    # Create a table with the column names
+    table = PrettyTable()
+    table.field_names = ["t_diff", "avg_diff_y", "avg_diff_d"]
+    
+    # Sort the keys to ensure t_diff is ordered
+        # Sort the keys to ensure t_diff is ordered
+    def sort_key(key):
+        return int(key.split('_')[2])
+    sorted_keys = sorted(average_differences.keys(), key=lambda x: int(x.split('_')[2]))
+    
+    # Add rows to the table for each t_diff value
+    for t_diff_key in sorted_keys:
+        values = average_differences[t_diff_key]
+        row = [t_diff_key, f"{values['avg_diff_y']:.6f}", f"{values['avg_diff_d']:.6f}"]
+        table.add_row(row)
+    
+    # Print the table
+    print(table)
 
 def data_load(data, use_treatment=False):
     # Move all tensors in the data tuple to GPU at once
@@ -403,3 +537,65 @@ def reparametrize(mu, logvar):
     # Reparametrization trick
     z = mu + epsilon * std
     return z
+
+# def cevae_loss_function(x_reconstructed, x, enc_preds, dec_preds, z_mu, z_logvar, y, t, aux_criterion):
+
+#     # Loss = logp(x,t∣z) + logp(y∣t,z) + logp(d∣t,z) + logp(z) − logq(z∣x,t,y,d) + logq(t=t∗∣x∗) + logq(y=y∗∣x∗,t∗) + logq(d=d∗∣x∗,t∗)
+
+#     # Reconstruction loss for x
+#     recon_loss = F.mse_loss(x_reconstructed, x)
+
+#     # Predictive loss for observed data
+#     enc_yd_pred, enc_t_pred = enc_preds
+#     dec_t_pred, dec_yd_pred = dec_preds
+
+#     pred_loss_y = F.mse_loss(enc_yd_pred[:, 1], y[:, 1])   # or use any appropriate loss
+#     pred_loss_d = F.mse_loss(enc_yd_pred[:, 0], y[:, 0])   # or use any appropriate loss
+
+#     # Use cross-entropy for categorical prediction of t
+#     pred_loss_t_enc = aux_criterion(enc_t_pred, t.long())
+#     pred_loss_t_dec = aux_criterion(dec_t_pred, t.long())
+
+#     # KL divergence
+#     kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
+
+#     # Combining the terms based on the provided formula
+#     total_loss = recon_loss + pred_loss_y + pred_loss_d + kl_loss + pred_loss_t_enc + pred_loss_t_dec
+
+#     return total_loss
+
+def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, criterion, aux_criterion): 
+      
+    # 1. Reconstruction Loss
+    ## mse method
+    # recon_loss_x = F.mse_loss(reconstructed, x)
+    # recon_loss_t = criterion(dec_t_pred, t)
+    # recon_loss_y = criterion(dec_y_pred, y)
+    # recon_loss_d = criterion(dec_d_pred, d)
+
+    ## log prob method
+    x_dist = torch.distributions.Normal(x_reconstructed, torch.exp(0.5 * torch.ones_like(x_reconstructed)))
+    t_dist = torch.distributions.Categorical(logits=dec_t_pred)
+    y_dist = torch.distributions.Normal(dec_y_pred, torch.exp(0.5 * torch.ones_like(dec_y_pred)))
+    d_dist = torch.distributions.Normal(dec_d_pred, torch.exp(0.5 * torch.ones_like(dec_d_pred)))
+    
+    recon_loss_x = -x_dist.log_prob(x).sum()
+    recon_loss_t = -t_dist.log_prob((t * 6).long()).sum()
+    recon_loss_y = -y_dist.log_prob(y).sum()
+    recon_loss_d = -d_dist.log_prob(d).sum()
+    
+    recon_loss = recon_loss_x + recon_loss_t + recon_loss_y + recon_loss_d
+
+    # 2. KL Divergence
+    kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
+
+    # 3. Auxiliary Loss (Using the predicted values t*, y*, and d*)
+    aux_loss_t = aux_criterion(enc_t_pred, (t * 6).long())  
+    aux_loss_y = criterion(enc_y_pred, y)  
+    aux_loss_d = criterion(enc_d_pred, d)  
+    aux_loss = aux_loss_t + aux_loss_y + aux_loss_d
+
+    # Combine the losses
+    total_loss = recon_loss + kl_loss + aux_loss
+
+    return total_loss, (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)

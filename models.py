@@ -104,7 +104,7 @@ class TableEmbedding(torch.nn.Module):
         reduction : "mean" : cluster 별 평균으로 reduction
                     "date" : cluster 내 date 평균으로 reduction
     '''
-    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="mean", use_treatment=False):
+    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="mean"):
         super().__init__()
         self.reduction = reduction
         self.disable_embedding = disable_embedding
@@ -353,78 +353,185 @@ class CEVAETransformer(nn.Module):
         cls_emb = output[:, 0, :]  
         return cls_emb
     
+# ------------------------ for yd only --embedding_dim 64 --shared_layers 1 --pred_layers 1 -n 300
+# class CEVAE_Encoder(nn.Module):
+#     def __init__(self, input_dim, latent_dim, hidden_dim=128, shared_layers=3, pred_layers=3):
+#         super(CEVAE_Encoder, self).__init__()
+                
+#         # Shared layers
+#         layers = []
+#         for _ in range(shared_layers):
+#             layers.append(nn.Linear(input_dim if len(layers) == 0 else hidden_dim, hidden_dim))
+#             layers.append(nn.ReLU())
+#         self.fc_shared = nn.Sequential(*layers)
+        
+#         # Latent variable z distribution parameters (mean and log variance)
+#         self.fc_mu = nn.Linear(hidden_dim, latent_dim)
+#         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
+        
+#         # Predict y, d with MLP
+#         yd_layers = []
+#         for _ in range(pred_layers):
+#             yd_layers.append(nn.Linear(hidden_dim if len(yd_layers) == 0 else hidden_dim, hidden_dim))
+#             yd_layers.append(nn.ReLU())
+#         yd_layers.append(nn.Linear(hidden_dim, 2))
+#         self.fc_yd = nn.Sequential(*yd_layers)
+        
+#         # Predict t with MLP
+#         t_layers = []
+#         for _ in range(pred_layers):
+#             t_layers.append(nn.Linear(hidden_dim if len(t_layers) == 0 else hidden_dim, hidden_dim))
+#             t_layers.append(nn.ReLU())
+#         t_layers.append(nn.Linear(hidden_dim, 7))
+#         self.fc_t = nn.Sequential(*t_layers)
+    
+#     def forward(self, x):
+#         h_shared = self.fc_shared(x)
+        
+#         mu = self.fc_mu(h_shared)
+#         logvar = self.fc_logvar(h_shared)
+        
+#         yd_pred = self.fc_yd(h_shared)
+#         t_pred = self.fc_t(h_shared)
+        
+#         return mu, logvar, yd_pred, t_pred
+    
 class CEVAE_Encoder(nn.Module):
-    def __init__(self, input_dim, latent_dim, hidden_dim=128, num_layers=2, pred_layers=2):
+    def __init__(self, input_dim, latent_dim, hidden_dim=128, shared_layers=3, pred_layers=3, t_classes=7):
         super(CEVAE_Encoder, self).__init__()
                 
         # Shared layers
         layers = []
-        for _ in range(num_layers):
+        for _ in range(shared_layers):
             layers.append(nn.Linear(input_dim if len(layers) == 0 else hidden_dim, hidden_dim))
             layers.append(nn.ReLU())
         self.fc_shared = nn.Sequential(*layers)
-        
-        # Latent variable z distribution parameters (mean and log variance)
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
-        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
-        
-        # Predict y, d with MLP
-        yd_layers = []
-        for _ in range(pred_layers):
-            yd_layers.append(nn.Linear(hidden_dim if len(yd_layers) == 0 else hidden_dim, hidden_dim))
-            yd_layers.append(nn.ReLU())
-        yd_layers.append(nn.Linear(hidden_dim, 2))
-        self.fc_yd = nn.Sequential(*yd_layers)
         
         # Predict t with MLP
         t_layers = []
         for _ in range(pred_layers):
             t_layers.append(nn.Linear(hidden_dim if len(t_layers) == 0 else hidden_dim, hidden_dim))
             t_layers.append(nn.ReLU())
-        t_layers.append(nn.Linear(hidden_dim, 7))
+        t_layers.append(nn.Linear(hidden_dim, t_classes))
         self.fc_t = nn.Sequential(*t_layers)
+        
+        # Predict yd based on t
+        self.yd_nns = nn.ModuleList([
+            self._build_yd_predictor(hidden_dim, pred_layers) for _ in range(t_classes)
+        ])
+        
+        # Calculate z (mu and logvar) based on t, yd, and x
+        self.z_nns = nn.ModuleList([
+            self._build_z_predictor(hidden_dim + 2, latent_dim, hidden_dim, pred_layers) for _ in range(t_classes)
+        ])
+
+    def _build_yd_predictor(self, hidden_dim, pred_layers):
+        yd_layers = []
+        for _ in range(pred_layers):
+            yd_layers.append(nn.Linear(hidden_dim, hidden_dim))
+            yd_layers.append(nn.ReLU())
+        yd_layers.append(nn.Linear(hidden_dim, 2))
+        return nn.Sequential(*yd_layers)
     
-    def forward(self, x):
+    def _build_z_predictor(self, input_dim, latent_dim, hidden_dim, pred_layers):
+        z_layers = []
+        for _ in range(pred_layers):
+            z_layers.append(nn.Linear(input_dim if len(z_layers) == 0 else hidden_dim, hidden_dim))
+            z_layers.append(nn.ReLU())
+        z_layers.extend([nn.Linear(hidden_dim, latent_dim), nn.Linear(hidden_dim, latent_dim)])
+        return nn.ModuleDict({
+            'mu': nn.Sequential(*z_layers[:-1]),      # pred layers hidden 공유, final layer 분리
+            'logvar': nn.Sequential(*(z_layers[:-2] + [z_layers[-1]]))  
+        })
+
+    def forward(self, x, t_gt=None):
         h_shared = self.fc_shared(x)
+
+        if t_gt==None:
+            t_pred = self.fc_t(h_shared)
+            t_class = t_pred.argmax(dim=1)
+        else:
+            t_class = t_gt
+            t_pred = None
+        yd_preds = [yd_nn(h_shared) for yd_nn in self.yd_nns]
+        yd_pred = torch.stack([yd_preds[i][idx] for idx, i in enumerate(t_class)], dim=0)
+
+        # Calculate mu and logvar based on t, yd, and x
+        h_combined = torch.cat([h_shared, yd_pred], dim=1)
+        z_preds = [z_nn['mu'](h_combined) for z_nn in self.z_nns]
+        mu = torch.stack([z_preds[i][idx] for idx, i in enumerate(t_class)], dim=0)
         
-        mu = self.fc_mu(h_shared)
-        logvar = self.fc_logvar(h_shared)
-        
-        yd_pred = self.fc_yd(h_shared)
-        t_pred = self.fc_t(h_shared)
-        
+        z_preds_logvar = [z_nn['logvar'](h_combined) for z_nn in self.z_nns]
+        logvar = torch.stack([z_preds_logvar[i][idx] for idx, i in enumerate(t_class)], dim=0)
+
         return mu, logvar, yd_pred, t_pred
 
 class CEVAE_Decoder(nn.Module):
-    def __init__(self, latent_dim, output_dim, hidden_dim=128, num_layers=2):
+    def __init__(self, latent_dim, output_dim, hidden_dim=128, num_layers=2, t_classes=7):
         super(CEVAE_Decoder, self).__init__()
         
-        layers = []
+        # Predict t from z
+        t_layers = []
         for _ in range(num_layers):
-            layers.append(nn.Linear(latent_dim if len(layers) == 0 else hidden_dim, hidden_dim))
-            layers.append(nn.ReLU())
-        self.fc = nn.Sequential(*layers, nn.Linear(hidden_dim, output_dim))
+            t_layers.append(nn.Linear(latent_dim if len(t_layers) == 0 else hidden_dim, hidden_dim))
+            t_layers.append(nn.ReLU())
+        t_layers.append(nn.Linear(hidden_dim, t_classes))
+        self.fc_t = nn.Sequential(*t_layers)
+        
+        # Predict y,d based on z and t
+        self.yd_nns = nn.ModuleList([
+            self._build_yd_predictor(latent_dim, hidden_dim, num_layers) for _ in range(t_classes)
+        ])
+        
+        # Directly predict x from z
+        x_layers = []
+        for _ in range(num_layers):
+            x_layers.append(nn.Linear(latent_dim if len(x_layers) == 0 else hidden_dim, hidden_dim))
+            x_layers.append(nn.ReLU())
+        x_layers.append(nn.Linear(hidden_dim, output_dim))
+        self.fc_x = nn.Sequential(*x_layers)
     
-    def forward(self, z):
-        return self.fc(z)
+    def _build_yd_predictor(self, latent_dim, hidden_dim, num_layers):
+        yd_layers = []
+        for _ in range(num_layers):
+            yd_layers.append(nn.Linear(latent_dim if len(yd_layers) == 0 else hidden_dim, hidden_dim))
+            yd_layers.append(nn.ReLU())
+        yd_layers.append(nn.Linear(hidden_dim, 2))  # Assuming y,d output is of size 2
+        return nn.Sequential(*yd_layers)
     
+    def forward(self, z, t_gt=None):
+        # Predict t from z
+        if t_gt==None:
+            t_pred = self.fc_t(z)
+            t_class = t_pred.argmax(dim=1)
+        else:
+            t_class = t_gt
+            t_pred = None
+        yd_preds = [yd_nn(z) for yd_nn in self.yd_nns]
+        yd_pred = torch.stack([yd_preds[i][idx] for idx, i in enumerate(t_class)], dim=0)
+        
+        # Directly predict x from z
+        x_pred = self.fc_x(z)
+        
+        return t_pred, yd_pred, x_pred
+
 class CEVAE_det(nn.Module):
-    def __init__(self, embedding_dim, latent_dim=16, encoder_hidden_dim=128, encoder_num_layers=2, encoder_pred_layers=2):
+    def __init__(self, embedding_dim, latent_dim=64, encoder_hidden_dim=128, encoder_shared_layers=3, encoder_pred_layers=1, transformer_layers=3, drop_out=0.0, num_heads=2):
         super(CEVAE_det, self).__init__()
         self.x_emb = CEVAEEmbedding(output_size=embedding_dim)
-        self.transformer_encoder = CEVAETransformer(input_size=embedding_dim, hidden_size=embedding_dim//2, num_layers=3, num_heads=2, drop_out=0)
-        self.encoder = CEVAE_Encoder(input_dim=embedding_dim, latent_dim=latent_dim, hidden_dim=encoder_hidden_dim, num_layers=encoder_num_layers, pred_layers=encoder_pred_layers)
-        self.decoder = CEVAE_Decoder(latent_dim=latent_dim, output_dim=embedding_dim, hidden_dim=encoder_hidden_dim, num_layers=encoder_num_layers)
+        self.transformer_encoder = CEVAETransformer(input_size=embedding_dim, hidden_size=embedding_dim//2, num_layers=transformer_layers, num_heads=num_heads, drop_out=drop_out)
+        self.encoder = CEVAE_Encoder(input_dim=embedding_dim, latent_dim=latent_dim, hidden_dim=encoder_hidden_dim, shared_layers=encoder_shared_layers, pred_layers=encoder_pred_layers)
+        self.decoder = CEVAE_Decoder(latent_dim=latent_dim, output_dim=embedding_dim, hidden_dim=encoder_hidden_dim, num_layers=encoder_shared_layers)
     
-    def forward(self, cont_p, cont_c, cat_p, cat_c, _len, diff):
+    def forward(self, cont_p, cont_c, cat_p, cat_c, _len, diff, t_gt=None):
         x = self.x_emb(cont_p, cont_c, cat_p, cat_c, _len, diff)
         x_transformed = self.transformer_encoder(x, _len)
-        z_mu, z_logvar, enc_yd_pred, enc_t_pred = self.encoder(x_transformed)
+        z_mu, z_logvar, enc_yd_pred, enc_t_pred = self.encoder(x_transformed, t_gt)
         
         # Sample z using reparametrization trick
         z = reparametrize(z_mu, z_logvar)
         
         # Decode z to get the reconstruction of x
-        x_reconstructed = self.decoder(z) # TODO: Naive Decoder
+        dec_t_pred, dec_yd_pred, x_reconstructed = self.decoder(z, t_gt)
         
-        return x_reconstructed, z_mu, z_logvar, (enc_yd_pred, enc_t_pred)
+        return x_transformed, x_reconstructed, z_mu, z_logvar, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred)
