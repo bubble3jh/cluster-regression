@@ -302,7 +302,7 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
         return 0, batch_num, out, y
     
 @torch.no_grad()
-def estimate_counterfactuals(model, dataloader, use_treatment=True):
+def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="minmax", use_treatment=True):
     model.eval()  # Set the model to evaluation mode
     all_counterfactual_differences = []
 
@@ -324,9 +324,12 @@ def estimate_counterfactuals(model, dataloader, use_treatment=True):
                 _, _, _, _, enc_preds_intervene, dec_preds_intervene = out
                 pred_yd_intervene, _ = enc_preds_intervene
                 
+                # TODO: reverse 과정 필요
+                ori_y, ori_d, int_y, int_d = reverse_scaling(scaling, pred_yd_original, pred_yd_intervene, a_y, b_y, a_d, b_d)
+
                 # Compute the differences from the original predictions
-                diff_y = pred_yd_intervene[:, 0] - pred_yd_original[:, 0]
-                diff_d = pred_yd_intervene[:, 1] - pred_yd_original[:, 1]
+                diff_y = int_y - ori_y
+                diff_d = int_d - ori_d
                 
                 # Store the t value difference and the prediction differences
                 t_diff = t_value - t_original

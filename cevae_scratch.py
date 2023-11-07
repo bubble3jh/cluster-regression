@@ -82,7 +82,7 @@ def main(args):
 
     # Load Model --------------------------------------------------------------------------------
     model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, drop_out=args.drop_out).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate)
     criterion = torch.nn.MSELoss(); aux_criterion= torch.nn.CrossEntropyLoss()
     print("Successfully load model!")
     #-------------------------------------------------------------------------------------
@@ -223,22 +223,21 @@ def main(args):
     print("Successfully trained model!")
 
     #-------------------------------------------------------------------------------------
-    # Evaluate counter factual
-    counterfactual_differences = utils.estimate_counterfactuals(model, tr_dataloader, use_treatment=True)
+    # Evaluate counter factual [only on train set]
+    counterfactual_differences = utils.estimate_counterfactuals(model, tr_dataloader, a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, use_treatment=True)
     organized_counterfactuals = utils.organize_counterfactuals(counterfactual_differences)
     avg_cf = utils.compute_average_differences(organized_counterfactuals)
     utils.print_average_differences(avg_cf)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Hyperparameters Configuration")
-    parser.add_argument("--feature_dim", default=128, type=int)
-    parser.add_argument("--embedding_dim", default=64, type=int)
+    parser.add_argument("--embedding_dim", default=128, type=int)
     parser.add_argument("--latent_dim", default=64, type=int, help='z dimension')
     parser.add_argument("--hidden_dim", default=128, type=int, help='y,d,t layers dimension')
-    parser.add_argument("--num_layers", default=1, type=int)
-    parser.add_argument("--pred_layers", default=1, type=int)
-    parser.add_argument("--shared_layers", default=3, type=int)
-    parser.add_argument("-n", "--num_epochs", default=300, type=int)
+    parser.add_argument("--num_layers", default=3, type=int, help='transformer layers')
+    parser.add_argument("--pred_layers", default=1, type=int, help='y,d predictor head layers')
+    parser.add_argument("--shared_layers", default=3, type=int, help='y,d predictor featurizer layers')
+    parser.add_argument("-n", "--num_epochs", default=30, type=int)
     parser.add_argument("-b", "--batch_size", default=32, type=int)
     parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
     parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
