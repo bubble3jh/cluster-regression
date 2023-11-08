@@ -65,7 +65,7 @@ def main(args):
 
     # Load Model --------------------------------------------------------------------------------
     model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, drop_out=args.drop_out, t_classes=t_classes).to(device)
-    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate, weight_decay=0.1)
     criterion = torch.nn.MSELoss(); aux_criterion = torch.nn.CrossEntropyLoss()
     print("Successfully load model!")
     #-------------------------------------------------------------------------------------
@@ -203,7 +203,7 @@ def main(args):
         desc = f"Epoch: {epoch+1}, tr_loss_y: {tr_eval_loss_y:.4f}, tr_loss_d: {tr_eval_loss_d:.4f}, val_loss_y: {val_loss_y:.4f}, val_loss_d: {val_loss_d:.4f}, te_loss_y: {te_mae_loss_y:.4f}, te_loss_d: {te_mae_loss_d:.4f}"
         pbar.set_description(desc)
         pbar.update(1)
-    print("Successfully trained model!")
+    print(f"Successfully trained model! | best d mae : {best_test_losses[0]:.4f} | best y mae : {best_test_losses[1]:.4f}")
 
     #-------------------------------------------------------------------------------------
     # Evaluate counter factual [only on train set]

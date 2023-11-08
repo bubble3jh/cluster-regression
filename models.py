@@ -155,113 +155,6 @@ class TableEmbedding(torch.nn.Module):
             x = x + self.positional_embedding(diff_days.int().squeeze(2))
         return reduction_cluster(x, diff_days, val_len, self.reduction)
     
-class CEVAE(torch.nn.Module):
-    '''
-        input_size : TableEmbedding 크기
-        hidden_size : Transformer Encoder 크기
-        output_size : y, d (2)
-        num_layers : Transformer Encoder Layer 개수
-        num_heads : Multi Head Attention Head 개수
-        drop_out : DropOut 정도
-        disable_embedding : 연속 데이터 embedding 여부
-    '''
-    def __init__(self, input_size, hidden_size, output_size, num_layers, num_heads, drop_out, disable_embedding):
-        super(Transformer, self).__init__()
-        
-        self.embedding = TableEmbedding(output_size=input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="date", use_treatment=True)
-        self.cls_token = nn.Parameter(torch.randn(1, 1, input_size))
-        self.transformer_layer = nn.TransformerEncoderLayer(
-            d_model=input_size,
-            nhead=num_heads,
-            dim_feedforward=hidden_size, 
-            dropout=drop_out,
-            batch_first=True
-        )
-        self.transformer_encoder = TransformerEncoder(self.transformer_layer, num_layers)
-        self.fc = nn.Linear(hidden_size, output_size)  
-
-        self.init_weights()
-
-    ## Transformer Weight 초기화 방법 ##
-    def init_weights(self) -> None:
-        initrange = 0.1
-        for module in self.embedding.modules():
-                if isinstance(module, nn.Linear) :
-                    module.weight.data.uniform_(-initrange, initrange)
-                    if module.bias is not None:
-                        module.bias.data.zero_()
-                elif isinstance(module, nn.Embedding):
-                    module.weight.data.uniform_(-initrange, initrange)
-        self.fc.bias.data.zero_()
-        self.fc.weight.data.uniform_(-initrange, initrange)
-
-    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
-        embedded = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
-        cls_token = self.cls_token.expand(embedded.size(0), -1, -1) 
-        input_with_cls = torch.cat([cls_token, embedded], dim=1)
-        mask = (torch.arange(input_with_cls.size(1)).expand(input_with_cls.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
-        output = self.transformer_encoder(input_with_cls, src_key_padding_mask=mask.bool())  
-        cls_output = output[:, 0, :]  
-        regression_output = self.fc(cls_output) 
-        
-        return regression_output
-    
-  
-# class CEVAEEmbedding(torch.nn.Module):
-#     '''
-#         output_size : embedding output의 크기
-#         disable_embedding : 연속 데이터의 임베딩 유무
-#         disable_pe : transformer의 sequance 기준 positional encoding add 유무
-#         reduction : "mean" : cluster 별 평균으로 reduction
-#                     "date" : cluster 내 date 평균으로 reduction
-#     '''
-#     def __init__(self, output_size=128, disable_embedding=False, disable_pe=False, reduction="date"):
-#         super().__init__()
-#         self.reduction = reduction
-#         self.disable_embedding = disable_embedding
-#         self.disable_pe = disable_pe
-#         if not disable_embedding:
-#             print("Embedding applied to data")
-#             nn_dim = emb_hidden_dim = emb_dim_c = emb_dim_p = output_size//4
-#             emb_dim = emb_dim_c + emb_dim_p
-#             self.cont_NN = nn.Sequential(nn.Linear(4, emb_hidden_dim),
-#                                         nn.ReLU(),
-#                                         nn.Linear(emb_hidden_dim, nn_dim * 2))
-#         else:
-#             emb_dim_p = 5
-#             emb_dim_c = 2
-#         self.lookup_gender  = nn.Embedding(2, emb_dim)
-#         self.lookup_korean  = nn.Embedding(2, emb_dim)
-#         self.lookup_primary  = nn.Embedding(2, emb_dim)
-#         self.lookup_job  = nn.Embedding(11, emb_dim)
-#         self.lookup_rep  = nn.Embedding(34, emb_dim)
-#         self.lookup_place  = nn.Embedding(19, emb_dim)
-#         self.lookup_add  = nn.Embedding(31, emb_dim)
-#         if not disable_pe:
-#             self.positional_embedding  = nn.Embedding(5, output_size)
-
-#     def forward(self, cont, cat, val_len, diff_days):
-#         if not self.disable_embedding:
-#             cont_emb = self.cont_NN(cont)
-#         a1_embs = self.lookup_gender(cat[:,:,0].to(torch.int))
-#         a2_embs = self.lookup_korean(cat[:,:,1].to(torch.int))
-#         a3_embs = self.lookup_primary(cat[:,:,2].to(torch.int))
-#         a4_embs = self.lookup_job(cat[:,:,3].to(torch.int))
-#         a5_embs = self.lookup_rep(cat[:,:,4].to(torch.int))
-#         a6_embs = self.lookup_place(cat[:,:,5].to(torch.int))
-#         a7_embs = self.lookup_add(cat[:,:,6].to(torch.int))
-        
-#         cat_emb = torch.mean(torch.stack([a1_embs, a2_embs, a3_embs, a4_embs, a5_embs, a6_embs, a7_embs]), axis=0)
-
-#         if not self.disable_embedding:
-#             x = torch.cat((cat_emb, cont_emb), dim=2)
-#         else:
-#             x = torch.cat((cat_emb, cont), dim=2)
-            
-#         if not self.disable_pe:
-#             x = x + self.positional_embedding(diff_days.int().squeeze(2))
-#         return reduction_cluster(x, diff_days, val_len, self.reduction)
-    
 
 class CEVAEEmbedding(torch.nn.Module):
     '''
@@ -524,7 +417,7 @@ class CEVAE_det(nn.Module):
         self.transformer_encoder = CEVAETransformer(input_size=embedding_dim, hidden_size=embedding_dim//2, num_layers=transformer_layers, num_heads=num_heads, drop_out=drop_out)
         self.encoder = CEVAE_Encoder(input_dim=embedding_dim, latent_dim=latent_dim, hidden_dim=encoder_hidden_dim, shared_layers=encoder_shared_layers, pred_layers=encoder_pred_layers, t_classes=t_classes)
         self.decoder = CEVAE_Decoder(latent_dim=latent_dim, output_dim=embedding_dim, hidden_dim=encoder_hidden_dim, num_layers=encoder_shared_layers, t_classes=t_classes)
-    
+
     def forward(self, cont_p, cont_c, cat_p, cat_c, _len, diff, t_gt=None):
         x = self.x_emb(cont_p, cont_c, cat_p, cat_c, _len, diff)
         x_transformed = self.transformer_encoder(x, _len)

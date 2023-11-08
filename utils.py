@@ -577,7 +577,7 @@ def reparametrize(mu, logvar):
 #     return total_loss
 
 def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, warm_yd, criterion, aux_criterion, binary_t): 
-      
+    # print(x)
     # 0. Warmup Loss
     warmup_loss_y = criterion(warm_yd[:,0], y)  
     warmup_loss_d = criterion(warm_yd[:,1], d)  
@@ -610,8 +610,8 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     aux_loss_y = criterion(enc_y_pred, y)  
     aux_loss_d = criterion(enc_d_pred, d)  
     aux_loss = aux_loss_t + aux_loss_y + aux_loss_d
-
     # Combine the losses
-    total_loss = recon_loss + kl_loss + aux_loss
-
+    # total_loss = recon_loss + kl_loss + aux_loss
+    # total_loss = aux_loss_y + aux_loss_d
+    total_loss = warmup_loss
     return total_loss, warmup_loss, (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)
