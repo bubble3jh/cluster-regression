@@ -15,7 +15,7 @@ from collections import defaultdict
 from prettytable import PrettyTable
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
-    def __init__(self, args, data, scale='minmax', use_treatment=False):
+    def __init__(self, args, data, scale='minmax', use_treatment=False, binary_t=False):
         self.use_treatment = use_treatment
         # padding tensors
         self.diff_tensor = torch.zeros([124,1])
@@ -48,7 +48,11 @@ class Tabledata(Dataset):
         ## 데이터 특성 별 분류 및 저장 ##
         self.cluster = data.iloc[:,0].values.astype('float32')
         if use_treatment:
-            self.dis = data['dis'].values.astype('float32')
+            if not binary_t:
+                self.dis = data['dis'].values.astype('float32')
+            else:
+                print("use binary t")
+                self.dis = (data['dis'].values >= 0.5).astype('float32')
             self.cont_X = data.iloc[:, 1:6].drop(columns=['dis']).values.astype('float32')
         else:
             self.dis=None
@@ -186,7 +190,7 @@ class RMSELoss(nn.Module):
 
 
 ## Train --------------------------------------------------------------------------------------
-def train(data, model, optimizer, criterion,  lamb=0.0, aux_criterion=None, use_treatment=False, eval_criterion = None, scaling="minmax",a_y=None, b_y=None, a_d=None, b_d=None, pred_model="enc"):
+def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux_criterion=None, use_treatment=False, eval_criterion = None, scaling="minmax",a_y=None, b_y=None, a_d=None, b_d=None, pred_model="enc", binary_t=False):
     eval_loss_y = None; eval_loss_d=None
     model.train()
     optimizer.zero_grad()
@@ -194,10 +198,10 @@ def train(data, model, optimizer, criterion,  lamb=0.0, aux_criterion=None, use_
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
         t = rest[0]
-        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds = out
+        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
         enc_yd_pred, enc_t_pred = enc_preds
         dec_yd_pred, dec_t_pred = dec_preds
-        loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
+        loss, warmup_loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
         (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
         if True: # TODO: hardcode
             loss_y = enc_loss_y
@@ -220,7 +224,10 @@ def train(data, model, optimizer, criterion,  lamb=0.0, aux_criterion=None, use_
     if lamb != 0.0:
         loss += lamb * torch.norm(model.linear1.weight, p=2)
     if not torch.isnan(loss):
-        loss.backward()
+        if epoch >= warmup_iter:  
+            loss.backward()
+        else:
+            warmup_loss.backward()
         optimizer.step()
         return loss_d.item(), loss_y.item(), batch_num, out, y, eval_loss_y, eval_loss_d
     else:
@@ -235,7 +242,7 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
         t = rest[0]
-        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds = out
+        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
         enc_yd_pred, enc_t_pred = enc_preds
         dec_yd_pred, dec_t_pred = dec_preds
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
@@ -272,7 +279,7 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
         t = rest[0]
-        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds = out
+        x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
         enc_yd_pred, enc_t_pred = enc_preds
         dec_yd_pred, dec_t_pred = dec_preds
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
@@ -302,7 +309,8 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
         return 0, batch_num, out, y
     
 @torch.no_grad()
-def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="minmax", use_treatment=True):
+def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="minmax", use_treatment=True, binary_t=False):
+    counter_factual_classes = 2 if binary_t else 7
     model.eval()  # Set the model to evaluation mode
     all_counterfactual_differences = []
 
@@ -310,18 +318,21 @@ def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="min
         batch_num, cont_p, cont_c, cat_p, cat_c, len_, y, diff_days, *rest = data_load(data, use_treatment)
         
         if use_treatment:
-            t_original = 6*rest[0].long()
+            if binary_t:
+                t_original = rest[0].long()    
+            else:
+                t_original = 6*rest[0].long()
             batch_counterfactual_differences = []
 
             # Get the original predictions
             out_original = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t_original)
-            _, _, _, _, enc_preds_original, dec_preds_original = out_original # TODO:assume encoder output
+            _, _, _, _, enc_preds_original, dec_preds_original, warmup_original = out_original # TODO:assume encoder output
             pred_yd_original, _ = enc_preds_original
             
-            for t_value in range(7):  # t values ranging from 0 to 6
+            for t_value in range(counter_factual_classes):  
                 t = torch.full_like(t_original, fill_value=t_value).long()  # Create a tensor with the new t value
                 out = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t)
-                _, _, _, _, enc_preds_intervene, dec_preds_intervene = out
+                _, _, _, _, enc_preds_intervene, dec_preds_intervene, _ = out
                 pred_yd_intervene, _ = enc_preds_intervene
                 
                 # TODO: reverse 과정 필요
@@ -445,8 +456,6 @@ def set_seed(random_seed=1000):
     torch.backends.cudnn.benchmark = False
     np.random.seed(random_seed)
     random.seed(random_seed)
-    import pyro
-    pyro.set_rng_seed(random_seed)
 
 
 def save_checkpoint(file_path, epoch, **kwargs):
@@ -567,8 +576,12 @@ def reparametrize(mu, logvar):
 
 #     return total_loss
 
-def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, criterion, aux_criterion): 
+def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, warm_yd, criterion, aux_criterion, binary_t): 
       
+    # 0. Warmup Loss
+    warmup_loss_y = criterion(warm_yd[:,0], y)  
+    warmup_loss_d = criterion(warm_yd[:,1], d)  
+    warmup_loss = warmup_loss_y + warmup_loss_d
     # 1. Reconstruction Loss
     ## mse method
     # recon_loss_x = F.mse_loss(reconstructed, x)
@@ -583,7 +596,7 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     d_dist = torch.distributions.Normal(dec_d_pred, torch.exp(0.5 * torch.ones_like(dec_d_pred)))
     
     recon_loss_x = -x_dist.log_prob(x).sum()
-    recon_loss_t = -t_dist.log_prob((t * 6).long()).sum()
+    recon_loss_t = -t_dist.log_prob(t.long()).sum() if binary_t else -t_dist.log_prob((t * 6).long()).sum()
     recon_loss_y = -y_dist.log_prob(y).sum()
     recon_loss_d = -d_dist.log_prob(d).sum()
     
@@ -593,7 +606,7 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
 
     # 3. Auxiliary Loss (Using the predicted values t*, y*, and d*)
-    aux_loss_t = aux_criterion(enc_t_pred, (t * 6).long())  
+    aux_loss_t = aux_criterion(enc_t_pred, t.long()) if binary_t else aux_criterion(enc_t_pred, (t * 6).long())  
     aux_loss_y = criterion(enc_y_pred, y)  
     aux_loss_d = criterion(enc_d_pred, d)  
     aux_loss = aux_loss_t + aux_loss_y + aux_loss_d
@@ -601,4 +614,4 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     # Combine the losses
     total_loss = recon_loss + kl_loss + aux_loss
 
-    return total_loss, (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)
+    return total_loss, warmup_loss, (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)

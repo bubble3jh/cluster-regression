@@ -1,25 +1,11 @@
 # Copyright (c) 2017-2019 Uber Technologies, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-This example demonstrates how to use the Causal Effect Variational Autoencoder
-[1] implemented in pyro.contrib.cevae.CEVAE, documented at
-http://docs.pyro.ai/en/latest/contrib.cevae.html
-
-**References**
-
-[1] C. Louizos, U. Shalit, J. Mooij, D. Sontag, R. Zemel, M. Welling (2017).
-    Causal Effect Inference with Deep Latent-Variable Models.
-    http://papers.nips.cc/paper/7223-causal-effect-inference-with-deep-latent-variable-models.pdf
-    https://github.com/AMLab-Amsterdam/CEVAE
-"""
 import argparse
 import logging
 
 import torch
 
-import pyro
-import pyro.distributions as dist
 
 import torch
 import torch.nn as nn
@@ -27,19 +13,15 @@ import numpy as np
 import pandas as pd
 from IPython.display import display
 
-import os, time
 import math
 
 import argparse
-import tabulate
 from prettytable import PrettyTable
 from models import CEVAE_det, Transformer
 import utils, models, ml_algorithm
 import wandb
 from torch.utils.data import DataLoader, random_split, ConcatDataset, TensorDataset
 from tqdm import tqdm
-logging.getLogger("pyro").setLevel(logging.DEBUG)
-logging.getLogger("pyro").handlers[0].setLevel(logging.DEBUG)
 
 
 def main(args):
@@ -72,8 +54,9 @@ def main(args):
     args.data_path='./data/'
     args.scaling='minmax'
     data = pd.read_csv(args.data_path+f"data_cut_{0}.csv")
+    t_classes=2 if args.binary_t else 7
     # dataset = utils.CEVAEdataset(data, args.scaling, t_type)
-    dataset = utils.Tabledata(args, data, scale="minmax", use_treatment=True)
+    dataset = utils.Tabledata(args, data, scale="minmax", use_treatment=True, binary_t=args.binary_t)
     train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
     tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
@@ -81,9 +64,9 @@ def main(args):
     print("Successfully load data!")
 
     # Load Model --------------------------------------------------------------------------------
-    model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, drop_out=args.drop_out).to(device)
+    model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, drop_out=args.drop_out, t_classes=t_classes).to(device)
     optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate)
-    criterion = torch.nn.MSELoss(); aux_criterion= torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.MSELoss(); aux_criterion = torch.nn.CrossEntropyLoss()
     print("Successfully load model!")
     #-------------------------------------------------------------------------------------
     # Train.
@@ -104,8 +87,8 @@ def main(args):
         tr_gt_d_list = []; val_gt_d_list = []; te_gt_d_list = []
         tr_pred_d_list = []; val_pred_d_list = []; te_pred_d_list = []
         for itr, data in enumerate(tr_dataloader):
-            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, *tr_eval_losses = utils.train(data, model, optimizer, criterion, aux_criterion=aux_criterion, eval_criterion=eval_criterion, use_treatment=True,
-                                                                                                                        a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, pred_model=args.pred_model)
+            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, *tr_eval_losses = utils.train(data, model, optimizer, criterion, epoch, warmup_iter=args.warmup_iter, aux_criterion=aux_criterion, eval_criterion=eval_criterion, use_treatment=True,
+                                                                                                                        a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, pred_model=args.pred_model, binary_t=args.binary_t)
             tr_epoch_loss_d += tr_batch_loss_d
             tr_epoch_loss_y += tr_batch_loss_y
             concat_tr_num_data += tr_num_data
@@ -224,7 +207,7 @@ def main(args):
 
     #-------------------------------------------------------------------------------------
     # Evaluate counter factual [only on train set]
-    counterfactual_differences = utils.estimate_counterfactuals(model, tr_dataloader, a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, use_treatment=True)
+    counterfactual_differences = utils.estimate_counterfactuals(model, tr_dataloader, a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, use_treatment=True, binary_t=args.binary_t)
     organized_counterfactuals = utils.organize_counterfactuals(counterfactual_differences)
     avg_cf = utils.compute_average_differences(organized_counterfactuals)
     utils.print_average_differences(avg_cf)
@@ -238,12 +221,15 @@ def parse_args():
     parser.add_argument("--pred_layers", default=1, type=int, help='y,d predictor head layers')
     parser.add_argument("--shared_layers", default=3, type=int, help='y,d predictor featurizer layers')
     parser.add_argument("-n", "--num_epochs", default=30, type=int)
+    parser.add_argument("--warmup_iter", default=0, type=int)
     parser.add_argument("-b", "--batch_size", default=32, type=int)
     parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
     parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
     parser.add_argument("--weight-decay", default=1e-4, type=float)
     parser.add_argument("--drop_out", type=float, default=0.0)
     parser.add_argument("--pred_model", default="encoder", type=str, choices=["encoder", "decoder"])
+    parser.add_argument("--binary_t", action='store_true',
+        help = "Use t as binary class (Default : False)")
     # parser.add_argument("--lambda1", default=1, type=float, help='additional q loss for t')
     # parser.add_argument("--lambda2", default=1, type=float, help='additional q loss for y')
     # parser.add_argument("--lambda3", default=1, type=float, help='additional q loss for d')
