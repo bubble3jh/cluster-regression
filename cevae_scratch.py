@@ -214,12 +214,12 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Hyperparameters Configuration")
-    parser.add_argument("--embedding_dim", default=128, type=int)
-    parser.add_argument("--latent_dim", default=64, type=int, help='z dimension')
-    parser.add_argument("--hidden_dim", default=128, type=int, help='y,d,t layers dimension')
+    parser.add_argument("--embedding_dim", default=32, type=int)
+    parser.add_argument("--latent_dim", default=16, type=int, help='z dimension')
+    parser.add_argument("--hidden_dim", default=32, type=int, help='y,d,t layers dimension')
     parser.add_argument("--num_layers", default=3, type=int, help='transformer layers')
     parser.add_argument("--pred_layers", default=1, type=int, help='y,d predictor head layers')
-    parser.add_argument("--shared_layers", default=3, type=int, help='y,d predictor featurizer layers')
+    parser.add_argument("--shared_layers", default=1, type=int, help='y,d predictor featurizer layers')
     parser.add_argument("-n", "--num_epochs", default=30, type=int)
     parser.add_argument("--warmup_iter", default=0, type=int)
     parser.add_argument("-b", "--batch_size", default=32, type=int)
