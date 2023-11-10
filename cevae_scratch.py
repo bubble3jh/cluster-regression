@@ -65,7 +65,7 @@ def main(args):
 
     # Load Model --------------------------------------------------------------------------------
     model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, drop_out=args.drop_out, t_classes=t_classes).to(device)
-    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate, weight_decay=0.1)
+    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     criterion = torch.nn.MSELoss(); aux_criterion = torch.nn.CrossEntropyLoss()
     print("Successfully load model!")
     #-------------------------------------------------------------------------------------

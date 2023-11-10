@@ -290,7 +290,7 @@ class CEVAETransformer(nn.Module):
 #         return mu, logvar, yd_pred, t_pred
     
 class CEVAE_Encoder(nn.Module):
-    def __init__(self, input_dim, latent_dim, hidden_dim=128, shared_layers=3, pred_layers=3, t_classes=7):
+    def __init__(self, input_dim, latent_dim, hidden_dim=128, shared_layers=3, pred_layers=3, t_classes=7, drop_out=0.0):
         super(CEVAE_Encoder, self).__init__()
         # Warm up layer
         self.warm_up = nn.Linear(input_dim, 2) # predict only y and d
@@ -299,6 +299,7 @@ class CEVAE_Encoder(nn.Module):
         layers = []
         for _ in range(shared_layers):
             layers.append(nn.Linear(input_dim if len(layers) == 0 else hidden_dim, hidden_dim))
+            layers.append(nn.Dropout(drop_out))
             layers.append(nn.ReLU())
         self.fc_shared = nn.Sequential(*layers)
         
@@ -306,32 +307,35 @@ class CEVAE_Encoder(nn.Module):
         t_layers = []
         for _ in range(pred_layers):
             t_layers.append(nn.Linear(hidden_dim if len(t_layers) == 0 else hidden_dim, hidden_dim))
+            t_layers.append(nn.Dropout(drop_out))
             t_layers.append(nn.ReLU())
         t_layers.append(nn.Linear(hidden_dim, t_classes))
         self.fc_t = nn.Sequential(*t_layers)
         
         # Predict yd based on t
         self.yd_nns = nn.ModuleList([
-            self._build_yd_predictor(hidden_dim, pred_layers) for _ in range(t_classes)
+            self._build_yd_predictor(hidden_dim, pred_layers, drop_out) for _ in range(t_classes)
         ])
         
         # Calculate z (mu and logvar) based on t, yd, and x
         self.z_nns = nn.ModuleList([
-            self._build_z_predictor(hidden_dim + 2, latent_dim, hidden_dim, pred_layers) for _ in range(t_classes)
+            self._build_z_predictor(hidden_dim + 2, latent_dim, hidden_dim, pred_layers, drop_out) for _ in range(t_classes)
         ])
 
-    def _build_yd_predictor(self, hidden_dim, pred_layers):
+    def _build_yd_predictor(self, hidden_dim, pred_layers, drop_out):
         yd_layers = []
         for _ in range(pred_layers):
             yd_layers.append(nn.Linear(hidden_dim, hidden_dim))
+            yd_layers.append(nn.Dropout(drop_out))
             yd_layers.append(nn.ReLU())
         yd_layers.append(nn.Linear(hidden_dim, 2))
         return nn.Sequential(*yd_layers)
     
-    def _build_z_predictor(self, input_dim, latent_dim, hidden_dim, pred_layers):
+    def _build_z_predictor(self, input_dim, latent_dim, hidden_dim, pred_layers, drop_out):
         z_layers = []
         for _ in range(pred_layers):
             z_layers.append(nn.Linear(input_dim if len(z_layers) == 0 else hidden_dim, hidden_dim))
+            z_layers.append(nn.Dropout(drop_out))
             z_layers.append(nn.ReLU())
         z_layers.extend([nn.Linear(hidden_dim, latent_dim), nn.Linear(hidden_dim, latent_dim)])
         return nn.ModuleDict({
@@ -362,34 +366,37 @@ class CEVAE_Encoder(nn.Module):
         return mu, logvar, yd_pred, t_pred, warm_yd
 
 class CEVAE_Decoder(nn.Module):
-    def __init__(self, latent_dim, output_dim, hidden_dim=128, num_layers=2, t_classes=7):
+    def __init__(self, latent_dim, output_dim, hidden_dim=128, num_layers=2, t_classes=7, drop_out=0.0):
         super(CEVAE_Decoder, self).__init__()
         
         # Predict t from z
         t_layers = []
         for _ in range(num_layers):
             t_layers.append(nn.Linear(latent_dim if len(t_layers) == 0 else hidden_dim, hidden_dim))
+            t_layers.append(nn.Dropout(drop_out))
             t_layers.append(nn.ReLU())
         t_layers.append(nn.Linear(hidden_dim, t_classes))
         self.fc_t = nn.Sequential(*t_layers)
         
         # Predict y,d based on z and t
         self.yd_nns = nn.ModuleList([
-            self._build_yd_predictor(latent_dim, hidden_dim, num_layers) for _ in range(t_classes)
+            self._build_yd_predictor(latent_dim, hidden_dim, num_layers, drop_out) for _ in range(t_classes)
         ])
         
         # Directly predict x from z
         x_layers = []
         for _ in range(num_layers):
             x_layers.append(nn.Linear(latent_dim if len(x_layers) == 0 else hidden_dim, hidden_dim))
+            x_layers.append(nn.Dropout(drop_out))
             x_layers.append(nn.ReLU())
         x_layers.append(nn.Linear(hidden_dim, output_dim))
         self.fc_x = nn.Sequential(*x_layers)
     
-    def _build_yd_predictor(self, latent_dim, hidden_dim, num_layers):
+    def _build_yd_predictor(self, latent_dim, hidden_dim, num_layers, drop_out):
         yd_layers = []
         for _ in range(num_layers):
             yd_layers.append(nn.Linear(latent_dim if len(yd_layers) == 0 else hidden_dim, hidden_dim))
+            yd_layers.append(nn.Dropout(drop_out))
             yd_layers.append(nn.ReLU())
         yd_layers.append(nn.Linear(hidden_dim, 2))  # Assuming y,d output is of size 2
         return nn.Sequential(*yd_layers)
@@ -415,8 +422,8 @@ class CEVAE_det(nn.Module):
         super(CEVAE_det, self).__init__()
         self.x_emb = CEVAEEmbedding(output_size=embedding_dim)
         self.transformer_encoder = CEVAETransformer(input_size=embedding_dim, hidden_size=embedding_dim//2, num_layers=transformer_layers, num_heads=num_heads, drop_out=drop_out)
-        self.encoder = CEVAE_Encoder(input_dim=embedding_dim, latent_dim=latent_dim, hidden_dim=encoder_hidden_dim, shared_layers=encoder_shared_layers, pred_layers=encoder_pred_layers, t_classes=t_classes)
-        self.decoder = CEVAE_Decoder(latent_dim=latent_dim, output_dim=embedding_dim, hidden_dim=encoder_hidden_dim, num_layers=encoder_shared_layers, t_classes=t_classes)
+        self.encoder = CEVAE_Encoder(input_dim=embedding_dim, latent_dim=latent_dim, hidden_dim=encoder_hidden_dim, shared_layers=encoder_shared_layers, pred_layers=encoder_pred_layers, t_classes=t_classes, drop_out=drop_out)
+        self.decoder = CEVAE_Decoder(latent_dim=latent_dim, output_dim=embedding_dim, hidden_dim=encoder_hidden_dim, num_layers=encoder_shared_layers, t_classes=t_classes, drop_out=drop_out)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, _len, diff, t_gt=None):
         x = self.x_emb(cont_p, cont_c, cat_p, cat_c, _len, diff)

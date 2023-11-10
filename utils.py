@@ -201,12 +201,15 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
         enc_yd_pred, enc_t_pred = enc_preds
         dec_yd_pred, dec_t_pred = dec_preds
-        loss, warmup_loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
-        (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
+        loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
+        (warmup_loss_y, warmup_loss_d), (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
         if True: # TODO: hardcode
-            loss_y = enc_loss_y
-            loss_d = enc_loss_d
-            out = enc_yd_pred
+            # loss_y = enc_loss_y
+            # loss_d = enc_loss_d
+            # out = enc_yd_pred
+            loss_y = warmup_loss_y
+            loss_d = warmup_loss_d
+            out = warm_yd
         else:
             loss_y = dec_loss_y
             loss_d = dec_loss_d
@@ -577,28 +580,27 @@ def reparametrize(mu, logvar):
 #     return total_loss
 
 def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, warm_yd, criterion, aux_criterion, binary_t): 
-    # print(x)
     # 0. Warmup Loss
     warmup_loss_y = criterion(warm_yd[:,0], y)  
     warmup_loss_d = criterion(warm_yd[:,1], d)  
     warmup_loss = warmup_loss_y + warmup_loss_d
     # 1. Reconstruction Loss
     ## mse method
-    # recon_loss_x = F.mse_loss(reconstructed, x)
-    # recon_loss_t = criterion(dec_t_pred, t)
-    # recon_loss_y = criterion(dec_y_pred, y)
-    # recon_loss_d = criterion(dec_d_pred, d)
+    recon_loss_x = F.mse_loss(x_reconstructed, x)
+    recon_loss_t = aux_criterion(dec_t_pred, t.long()) if binary_t else aux_criterion(dec_t_pred, (t * 6).long())  
+    recon_loss_y = criterion(dec_y_pred, y)
+    recon_loss_d = criterion(dec_d_pred, d)
 
     ## log prob method
-    x_dist = torch.distributions.Normal(x_reconstructed, torch.exp(0.5 * torch.ones_like(x_reconstructed)))
-    t_dist = torch.distributions.Categorical(logits=dec_t_pred)
-    y_dist = torch.distributions.Normal(dec_y_pred, torch.exp(0.5 * torch.ones_like(dec_y_pred)))
-    d_dist = torch.distributions.Normal(dec_d_pred, torch.exp(0.5 * torch.ones_like(dec_d_pred)))
+    # x_dist = torch.distributions.Normal(x_reconstructed, torch.exp(0.5 * torch.ones_like(x_reconstructed)))
+    # t_dist = torch.distributions.Categorical(logits=dec_t_pred)
+    # y_dist = torch.distributions.Normal(dec_y_pred, torch.exp(0.5 * torch.ones_like(dec_y_pred)))
+    # d_dist = torch.distributions.Normal(dec_d_pred, torch.exp(0.5 * torch.ones_like(dec_d_pred)))
     
-    recon_loss_x = -x_dist.log_prob(x).sum()
-    recon_loss_t = -t_dist.log_prob(t.long()).sum() if binary_t else -t_dist.log_prob((t * 6).long()).sum()
-    recon_loss_y = -y_dist.log_prob(y).sum()
-    recon_loss_d = -d_dist.log_prob(d).sum()
+    # recon_loss_x = -x_dist.log_prob(x).sum()
+    # recon_loss_t = -t_dist.log_prob(t.long()).sum() if binary_t else -t_dist.log_prob((t * 6).long()).sum()
+    # recon_loss_y = -y_dist.log_prob(y).sum()
+    # recon_loss_d = -d_dist.log_prob(d).sum()
     
     recon_loss = recon_loss_x + recon_loss_t + recon_loss_y + recon_loss_d
 
@@ -607,11 +609,11 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
 
     # 3. Auxiliary Loss (Using the predicted values t*, y*, and d*)
     aux_loss_t = aux_criterion(enc_t_pred, t.long()) if binary_t else aux_criterion(enc_t_pred, (t * 6).long())  
-    aux_loss_y = criterion(enc_y_pred, y)  
+    aux_loss_y = criterion(enc_y_pred, y)
     aux_loss_d = criterion(enc_d_pred, d)  
     aux_loss = aux_loss_t + aux_loss_y + aux_loss_d
     # Combine the losses
     # total_loss = recon_loss + kl_loss + aux_loss
     # total_loss = aux_loss_y + aux_loss_d
     total_loss = warmup_loss
-    return total_loss, warmup_loss, (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)
+    return total_loss, (warmup_loss_y, warmup_loss_d), (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)
