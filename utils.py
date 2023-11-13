@@ -308,9 +308,11 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
     else:
         return 0, batch_num, out, y
     
+# TODO: 이거 아님, ori-1~6 ori+1~6으로 가고, ori=1이라면? 식의 코드 변경
 @torch.no_grad()
 def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="minmax", use_treatment=True, binary_t=False):
-    counter_factual_classes = 2 if binary_t else 7
+    # counter_factual_classes = 2 if binary_t else 7
+    counter_factual_classes = 7
     model.eval()  # Set the model to evaluation mode
     all_counterfactual_differences = []
 
@@ -335,7 +337,6 @@ def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="min
                 _, _, _, _, enc_preds_intervene, dec_preds_intervene, _ = out
                 pred_yd_intervene, _ = enc_preds_intervene
                 
-                # TODO: reverse 과정 필요
                 ori_y, ori_d, int_y, int_d = reverse_scaling(scaling, pred_yd_original, pred_yd_intervene, a_y, b_y, a_d, b_d)
 
                 # Compute the differences from the original predictions
@@ -584,21 +585,21 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     warmup_loss = warmup_loss_y + warmup_loss_d
     # 1. Reconstruction Loss
     ## mse method
-    # recon_loss_x = F.mse_loss(reconstructed, x)
-    # recon_loss_t = criterion(dec_t_pred, t)
-    # recon_loss_y = criterion(dec_y_pred, y)
-    # recon_loss_d = criterion(dec_d_pred, d)
+    recon_loss_x = F.mse_loss(x_reconstructed, x)
+    recon_loss_t = criterion(dec_t_pred, t)
+    recon_loss_y = criterion(dec_y_pred, y)
+    recon_loss_d = criterion(dec_d_pred, d)
 
     ## log prob method
-    x_dist = torch.distributions.Normal(x_reconstructed, torch.exp(0.5 * torch.ones_like(x_reconstructed)))
-    t_dist = torch.distributions.Categorical(logits=dec_t_pred)
-    y_dist = torch.distributions.Normal(dec_y_pred, torch.exp(0.5 * torch.ones_like(dec_y_pred)))
-    d_dist = torch.distributions.Normal(dec_d_pred, torch.exp(0.5 * torch.ones_like(dec_d_pred)))
+    # x_dist = torch.distributions.Normal(x_reconstructed, torch.exp(0.5 * torch.ones_like(x_reconstructed)))
+    # t_dist = torch.distributions.Categorical(logits=dec_t_pred)
+    # y_dist = torch.distributions.Normal(dec_y_pred, torch.exp(0.5 * torch.ones_like(dec_y_pred)))
+    # d_dist = torch.distributions.Normal(dec_d_pred, torch.exp(0.5 * torch.ones_like(dec_d_pred)))
     
-    recon_loss_x = -x_dist.log_prob(x).sum()
-    recon_loss_t = -t_dist.log_prob(t.long()).sum() if binary_t else -t_dist.log_prob((t * 6).long()).sum()
-    recon_loss_y = -y_dist.log_prob(y).sum()
-    recon_loss_d = -d_dist.log_prob(d).sum()
+    # recon_loss_x = -x_dist.log_prob(x).sum()
+    # recon_loss_t = -t_dist.log_prob(t.long()).sum() if binary_t else -t_dist.log_prob((t * 6).long()).sum()
+    # recon_loss_y = -y_dist.log_prob(y).sum()
+    # recon_loss_d = -d_dist.log_prob(d).sum()
     
     recon_loss = recon_loss_x + recon_loss_t + recon_loss_y + recon_loss_d
 
@@ -606,12 +607,13 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
 
     # 3. Auxiliary Loss (Using the predicted values t*, y*, and d*)
-    aux_loss_t = aux_criterion(enc_t_pred, t.long()) if binary_t else aux_criterion(enc_t_pred, (t * 6).long())  
+    # aux_loss_t = aux_criterion(enc_t_pred, t.long()) if binary_t else aux_criterion(enc_t_pred, (t * 6).long())  
+    aux_loss_t = criterion(enc_t_pred, t) 
     aux_loss_y = criterion(enc_y_pred, y)  
     aux_loss_d = criterion(enc_d_pred, d)  
     aux_loss = aux_loss_t + aux_loss_y + aux_loss_d
     # Combine the losses
-    # total_loss = recon_loss + kl_loss + aux_loss
-    # total_loss = aux_loss_y + aux_loss_d
-    total_loss = warmup_loss
+    total_loss = recon_loss + kl_loss + aux_loss
+    if torch.isnan(total_loss):
+        import pdb;pdb.set_trace()
     return total_loss, warmup_loss, (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)

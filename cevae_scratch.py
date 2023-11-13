@@ -64,8 +64,12 @@ def main(args):
     print("Successfully load data!")
 
     # Load Model --------------------------------------------------------------------------------
-    model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, drop_out=args.drop_out, t_classes=t_classes).to(device)
-    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate, weight_decay=0.1)
+    model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, 
+                    encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, 
+                    drop_out=args.drop_out, t_classes=t_classes, t_pred_layers=args.t_pred_layers, skip_hidden=args.skip_hidden,
+                    t_embed_dim=args.t_embed_dim, yd_embed_dim=args.yd_embed_dim).to(device)
+    print(model)
+    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     criterion = torch.nn.MSELoss(); aux_criterion = torch.nn.CrossEntropyLoss()
     print("Successfully load model!")
     #-------------------------------------------------------------------------------------
@@ -214,22 +218,28 @@ def main(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Hyperparameters Configuration")
-    parser.add_argument("--embedding_dim", default=128, type=int)
-    parser.add_argument("--latent_dim", default=64, type=int, help='z dimension')
-    parser.add_argument("--hidden_dim", default=128, type=int, help='y,d,t layers dimension')
-    parser.add_argument("--num_layers", default=3, type=int, help='transformer layers')
+    parser.add_argument("--embedding_dim", default=32, type=int)
+    parser.add_argument("--latent_dim", default=16, type=int, help='z dimension')
+    parser.add_argument("--hidden_dim", default=32, type=int, help='y,d,t layers dimension')
+    parser.add_argument("--t_embed_dim", default=8, type=int, help='t emb dimension')
+    parser.add_argument("--yd_embed_dim", default=8, type=int, help='y,d emb dimension')
+    parser.add_argument("--num_layers", default=2, type=int, help='transformer layers')
     parser.add_argument("--pred_layers", default=1, type=int, help='y,d predictor head layers')
-    parser.add_argument("--shared_layers", default=3, type=int, help='y,d predictor featurizer layers')
+    parser.add_argument("--t_pred_layers", default=2, type=int, help='t predictor layers')
+    parser.add_argument("--shared_layers", default=2, type=int, help='y,d predictor featurizer layers')
     parser.add_argument("-n", "--num_epochs", default=30, type=int)
     parser.add_argument("--warmup_iter", default=0, type=int)
     parser.add_argument("-b", "--batch_size", default=32, type=int)
     parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
     parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
-    parser.add_argument("--weight-decay", default=1e-4, type=float)
+    parser.add_argument("--weight_decay", default=0, type=float)
     parser.add_argument("--drop_out", type=float, default=0.0)
     parser.add_argument("--pred_model", default="encoder", type=str, choices=["encoder", "decoder"])
     parser.add_argument("--binary_t", action='store_true',
         help = "Use t as binary class (Default : False)")
+    parser.add_argument("--skip_hidden", action='store_true',
+        help = "Skip hidden (Default : False)")
+    parser.add_argument('--make_model_complicate', action='store_true')
     # parser.add_argument("--lambda1", default=1, type=float, help='additional q loss for t')
     # parser.add_argument("--lambda2", default=1, type=float, help='additional q loss for y')
     # parser.add_argument("--lambda3", default=1, type=float, help='additional q loss for d')
@@ -256,6 +266,14 @@ def parse_args():
     parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
     args = parser.parse_args()
+    if args.make_model_complicate:
+        args.embedding_dim = 128
+        args.latent_dim = 64
+        args.hidden_dim = 128
+        args.t_embed_dim = 32
+        args.yd_embed_dim = 32
+        args.t_pred_layers = 3
+        args.shared_layers = 3
     return args
 
 def print_args_to_table(args):
