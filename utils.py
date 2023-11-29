@@ -204,12 +204,12 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
         (warmup_loss_y, warmup_loss_d), (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
         if True: # TODO: hardcode
-            # loss_y = enc_loss_y
-            # loss_d = enc_loss_d
-            # out = enc_yd_pred
-            loss_y = warmup_loss_y
-            loss_d = warmup_loss_d
-            out = warm_yd
+            loss_y = enc_loss_y
+            loss_d = enc_loss_d
+            out = enc_yd_pred
+            # loss_y = warmup_loss_y
+            # loss_d = warmup_loss_d
+            # out = warm_yd
         else:
             loss_y = dec_loss_y
             loss_d = dec_loss_d
@@ -230,6 +230,7 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         if epoch >= warmup_iter:  
             loss.backward()
         else:
+            warmup_loss = warmup_loss_y + warmup_loss_d
             warmup_loss.backward()
         optimizer.step()
         return loss_d.item(), loss_y.item(), batch_num, out, y, eval_loss_y, eval_loss_d
@@ -311,49 +312,126 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
     else:
         return 0, batch_num, out, y
     
-# TODO: 이거 아님, ori-1~6 ori+1~6으로 가고, ori=1이라면? 식의 코드 변경
+# # TODO: 이거 아님, ori-1~6 ori+1~6으로 가고, ori=1이라면? 식의 코드 변경
+# @torch.no_grad()
+# def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="minmax", use_treatment=True, binary_t=False):
+#     # counter_factual_classes = 2 if binary_t else 7
+#     counter_factual_classes = 7
+#     model.eval()  # Set the model to evaluation mode
+#     all_counterfactual_differences = []
+
+#     for data in dataloader:
+#         batch_num, cont_p, cont_c, cat_p, cat_c, len_, y, diff_days, *rest = data_load(data, use_treatment)
+        
+#         if use_treatment:
+#             if binary_t:
+#                 t_original = rest[0].long()    
+#             else:
+#                 t_original = 6*rest[0].long()
+#             batch_counterfactual_differences = []
+
+#             # Get the original predictions
+#             out_original = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t_original)
+#             _, _, _, _, enc_preds_original, dec_preds_original, warmup_original = out_original # TODO:assume encoder output
+#             pred_yd_original, _ = enc_preds_original
+            
+#             for t_value in range(counter_factual_classes):  
+#                 t = torch.full_like(t_original, fill_value=t_value).long()  # Create a tensor with the new t value
+#                 out = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t)
+#                 _, _, _, _, enc_preds_intervene, dec_preds_intervene, _ = out
+#                 pred_yd_intervene, _ = enc_preds_intervene
+                
+#                 ori_y, ori_d, int_y, int_d = reverse_scaling(scaling, pred_yd_original, pred_yd_intervene, a_y, b_y, a_d, b_d)
+
+#                 # Compute the differences from the original predictions
+#                 diff_y = int_y - ori_y
+#                 diff_d = int_d - ori_d
+                
+#                 # Store the t value difference and the prediction differences
+#                 t_diff = t_value - t_original
+#                 differences_dict = {
+#                     "t_diff": t_diff.cpu().numpy(),
+#                     "diff_y": diff_y.cpu().numpy(),
+#                     "diff_d": diff_d.cpu().numpy()
+#                 }
+#                 batch_counterfactual_differences.append(differences_dict)
+            
+#             all_counterfactual_differences.append(batch_counterfactual_differences)
+#         else:
+#             raise ValueError("The use_treatment argument should be True for counterfactual estimation.")
+
+#     return all_counterfactual_differences
+
+
+# def organize_counterfactuals(all_counterfactual_differences):
+#     organized_counterfactuals = defaultdict(lambda: {"diff_y": [], "diff_d": []})
+
+#     for batch_counterfactual_differences in all_counterfactual_differences:
+#         for differences_dict in batch_counterfactual_differences:
+#             t_diff_values = differences_dict['t_diff']
+#             diff_y_values = differences_dict['diff_y']
+#             diff_d_values = differences_dict['diff_d']
+            
+#             # Assuming all arrays have the same length
+#             for i in range(len(t_diff_values)):
+#                 t_diff = t_diff_values[i]
+#                 key = f't_diff_{int(t_diff)}'
+#                 organized_counterfactuals[key]["diff_y"].append(diff_y_values[i])
+#                 organized_counterfactuals[key]["diff_d"].append(diff_d_values[i])
+#     # Convert lists to numpy arrays for consistency
+#     for key, value in organized_counterfactuals.items():
+#         organized_counterfactuals[key]["diff_y"] = np.array(value["diff_y"])
+#         organized_counterfactuals[key]["diff_d"] = np.array(value["diff_d"])
+
+#     return organized_counterfactuals
+
+# def compute_average_differences(organized_counterfactuals):
+#     average_differences = {}
+
+#     for t_diff_key, values in organized_counterfactuals.items():
+#         diff_y_avg = np.mean(values['diff_y'])
+#         diff_d_avg = np.mean(values['diff_d'])
+
+#         average_differences[t_diff_key] = {
+#             "avg_diff_y": diff_y_avg,
+#             "avg_diff_d": diff_d_avg
+#         }
+    
+#     return average_differences
 @torch.no_grad()
-def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="minmax", use_treatment=True, binary_t=False):
-    # counter_factual_classes = 2 if binary_t else 7
-    counter_factual_classes = 7
-    model.eval()  # Set the model to evaluation mode
+def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="minmax", use_treatment=True):
+    model.eval()
     all_counterfactual_differences = []
 
     for data in dataloader:
         batch_num, cont_p, cont_c, cat_p, cat_c, len_, y, diff_days, *rest = data_load(data, use_treatment)
-        
         if use_treatment:
-            if binary_t:
-                t_original = rest[0].long()    
-            else:
-                t_original = 6*rest[0].long()
+            t_original = rest[0]
+
             batch_counterfactual_differences = []
-
-            # Get the original predictions
             out_original = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t_original)
-            _, _, _, _, enc_preds_original, dec_preds_original, warmup_original = out_original # TODO:assume encoder output
-            pred_yd_original, _ = enc_preds_original
-            
-            for t_value in range(counter_factual_classes):  
-                t = torch.full_like(t_original, fill_value=t_value).long()  # Create a tensor with the new t value
-                out = model(cont_p, cont_c, cat_p, cat_c, len_, diff_days, t)
-                _, _, _, _, enc_preds_intervene, dec_preds_intervene, _ = out
-                pred_yd_intervene, _ = enc_preds_intervene
-                
-                ori_y, ori_d, int_y, int_d = reverse_scaling(scaling, pred_yd_original, pred_yd_intervene, a_y, b_y, a_d, b_d)
+            pred_yd_original = out_original
 
-                # Compute the differences from the original predictions
-                diff_y = int_y - ori_y
-                diff_d = int_d - ori_d
-                
-                # Store the t value difference and the prediction differences
-                t_diff = t_value - t_original
-                differences_dict = {
-                    "t_diff": t_diff.cpu().numpy(),
-                    "diff_y": diff_y.cpu().numpy(),
-                    "diff_d": diff_d.cpu().numpy()
-                }
-                batch_counterfactual_differences.append(differences_dict)
+            for delta_t in range(-6, 7):
+                t_adjusted = t_original + delta_t
+                # 범위 내에 있는 요소만 필터링합니다.
+                valid_indices = (t_adjusted >= 0) & (t_adjusted <= 6)
+                t_valid = t_adjusted[valid_indices]
+
+                if t_valid.numel() > 0:
+                    out = model(cont_p[valid_indices], cont_c[valid_indices], cat_p[valid_indices], cat_c[valid_indices], len_[valid_indices], diff_days[valid_indices], t_valid)
+                    pred_yd_intervene = out
+
+                    ori_y, ori_d, int_y, int_d = reverse_scaling(scaling, pred_yd_original[valid_indices], pred_yd_intervene, a_y, b_y, a_d, b_d)
+                    diff_y = int_y - ori_y
+                    diff_d = int_d - ori_d
+
+                    differences_dict = {
+                        "delta_t": delta_t,
+                        "diff_y": diff_y.cpu().numpy(),
+                        "diff_d": diff_d.cpu().numpy()
+                    }
+                    batch_counterfactual_differences.append(differences_dict)
             
             all_counterfactual_differences.append(batch_counterfactual_differences)
         else:
@@ -365,31 +443,29 @@ def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="min
 def organize_counterfactuals(all_counterfactual_differences):
     organized_counterfactuals = defaultdict(lambda: {"diff_y": [], "diff_d": []})
 
+    # 각 배치의 차이를 모읍니다.
     for batch_counterfactual_differences in all_counterfactual_differences:
         for differences_dict in batch_counterfactual_differences:
-            t_diff_values = differences_dict['t_diff']
-            diff_y_values = differences_dict['diff_y']
-            diff_d_values = differences_dict['diff_d']
-            
-            # Assuming all arrays have the same length
-            for i in range(len(t_diff_values)):
-                t_diff = t_diff_values[i]
-                key = f't_diff_{int(t_diff)}'
-                organized_counterfactuals[key]["diff_y"].append(diff_y_values[i])
-                organized_counterfactuals[key]["diff_d"].append(diff_d_values[i])
-    # Convert lists to numpy arrays for consistency
+            delta_t = differences_dict["delta_t"]
+            key = f't_diff_{delta_t}'
+            organized_counterfactuals[key]["diff_y"].extend(differences_dict["diff_y"])
+            organized_counterfactuals[key]["diff_d"].extend(differences_dict["diff_d"])
+
+    # TODO 디버깅 필요
+    # 각 diff_y와 diff_d 리스트를 하나의 NumPy 배열로 결합합니다.
     for key, value in organized_counterfactuals.items():
-        organized_counterfactuals[key]["diff_y"] = np.array(value["diff_y"])
-        organized_counterfactuals[key]["diff_d"] = np.array(value["diff_d"])
+        organized_counterfactuals[key]["diff_y"] = np.concatenate(value["diff_y"])
+        organized_counterfactuals[key]["diff_d"] = np.concatenate(value["diff_d"])
 
     return organized_counterfactuals
+
 
 def compute_average_differences(organized_counterfactuals):
     average_differences = {}
 
     for t_diff_key, values in organized_counterfactuals.items():
-        diff_y_avg = np.mean(values['diff_y'])
-        diff_d_avg = np.mean(values['diff_d'])
+        diff_y_avg = np.mean(values['diff_y'], axis=0)
+        diff_d_avg = np.mean(values['diff_d'], axis=0)
 
         average_differences[t_diff_key] = {
             "avg_diff_y": diff_y_avg,
@@ -426,8 +502,8 @@ def data_load(data, use_treatment=False):
         cont_p, cont_c, cat_p, cat_c, len, y, diff_days, dis = data
         return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days, dis
     else:
-        cont_p, cont_c, cat_p, cat_c, len, y, diff_days = data
-        return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days
+        cont_p, cont_c, cat_p, cat_c, len, y, diff_days, _ = data
+        return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days, None
 
 def reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d):
     '''
@@ -588,14 +664,9 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     # 1. Reconstruction Loss
     ## mse method
     recon_loss_x = F.mse_loss(x_reconstructed, x)
-<<<<<<< HEAD
-    recon_loss_t = aux_criterion(dec_t_pred, t.long()) if binary_t else aux_criterion(dec_t_pred, (t * 6).long())  
-=======
     recon_loss_t = criterion(dec_t_pred, t)
->>>>>>> d6cf0dc3a75581452639b1e57681ea49a2639fe0
     recon_loss_y = criterion(dec_y_pred, y)
     recon_loss_d = criterion(dec_d_pred, d)
-
     ## log prob method
     # x_dist = torch.distributions.Normal(x_reconstructed, torch.exp(0.5 * torch.ones_like(x_reconstructed)))
     # t_dist = torch.distributions.Categorical(logits=dec_t_pred)
@@ -613,17 +684,6 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
 
     # 3. Auxiliary Loss (Using the predicted values t*, y*, and d*)
-<<<<<<< HEAD
-    aux_loss_t = aux_criterion(enc_t_pred, t.long()) if binary_t else aux_criterion(enc_t_pred, (t * 6).long())  
-    aux_loss_y = criterion(enc_y_pred, y)
-    aux_loss_d = criterion(enc_d_pred, d)  
-    aux_loss = aux_loss_t + aux_loss_y + aux_loss_d
-    # Combine the losses
-    # total_loss = recon_loss + kl_loss + aux_loss
-    # total_loss = aux_loss_y + aux_loss_d
-    total_loss = warmup_loss
-    return total_loss, (warmup_loss_y, warmup_loss_d), (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)
-=======
     # aux_loss_t = aux_criterion(enc_t_pred, t.long()) if binary_t else aux_criterion(enc_t_pred, (t * 6).long())  
     aux_loss_t = criterion(enc_t_pred, t) 
     aux_loss_y = criterion(enc_y_pred, y)  
@@ -633,5 +693,4 @@ def cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, 
     total_loss = recon_loss + kl_loss + aux_loss
     if torch.isnan(total_loss):
         import pdb;pdb.set_trace()
-    return total_loss, warmup_loss, (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)
->>>>>>> d6cf0dc3a75581452639b1e57681ea49a2639fe0
+    return total_loss, (warmup_loss_y, warmup_loss_d), (aux_loss_y, aux_loss_d), (recon_loss_y, recon_loss_d)

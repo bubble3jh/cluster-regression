@@ -17,7 +17,7 @@ import math
 
 import argparse
 from prettytable import PrettyTable
-from models import CEVAE_det, Transformer
+from models import CEVAE_det, Transformer, CEVAE_debug
 import utils, models, ml_algorithm
 import wandb
 from torch.utils.data import DataLoader, random_split, ConcatDataset, TensorDataset
@@ -25,6 +25,7 @@ from tqdm import tqdm
 
 
 def main(args):
+    use_treatment = False
     args.tukey = False # TODO : Hard Coding
     utils.set_seed(args.seed)
     if args.device == "cuda" and torch.cuda.is_available(): 
@@ -64,15 +65,12 @@ def main(args):
     print("Successfully load data!")
 
     # Load Model --------------------------------------------------------------------------------
-<<<<<<< HEAD
-    model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, drop_out=args.drop_out, t_classes=t_classes).to(device)
-=======
-    model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, 
-                    encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.num_layers, 
-                    drop_out=args.drop_out, t_classes=t_classes, t_pred_layers=args.t_pred_layers, skip_hidden=args.skip_hidden,
-                    t_embed_dim=args.t_embed_dim, yd_embed_dim=args.yd_embed_dim).to(device)
+    # model = CEVAE_det(embedding_dim=args.embedding_dim, latent_dim=args.latent_dim, encoder_hidden_dim=args.hidden_dim, 
+    #                 encoder_shared_layers=args.shared_layers, encoder_pred_layers=args.pred_layers, transformer_layers=args.transformer_num_layers, 
+    #                 drop_out=args.drop_out, t_classes=t_classes, t_pred_layers=args.t_pred_layers, skip_hidden=args.skip_hidden,
+    #                 t_embed_dim=args.t_embed_dim, yd_embed_dim=args.yd_embed_dim).to(device)
+    model = CEVAE_debug(embedding_dim=128).to(device)
     print(model)
->>>>>>> d6cf0dc3a75581452639b1e57681ea49a2639fe0
     optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     criterion = torch.nn.MSELoss(); aux_criterion = torch.nn.CrossEntropyLoss()
     print("Successfully load model!")
@@ -95,10 +93,12 @@ def main(args):
         tr_gt_d_list = []; val_gt_d_list = []; te_gt_d_list = []
         tr_pred_d_list = []; val_pred_d_list = []; te_pred_d_list = []
         for itr, data in enumerate(tr_dataloader):
-            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, *tr_eval_losses = utils.train(data, model, optimizer, criterion, epoch, warmup_iter=args.warmup_iter, aux_criterion=aux_criterion, eval_criterion=eval_criterion, use_treatment=True,
+            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, *tr_eval_losses = utils.train(data, model, optimizer, criterion, epoch, warmup_iter=args.warmup_iter, aux_criterion=aux_criterion, eval_criterion=eval_criterion, use_treatment=use_treatment,
                                                                                                                         a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, pred_model=args.pred_model, binary_t=args.binary_t)
             tr_epoch_loss_d += tr_batch_loss_d
-            tr_epoch_loss_y += tr_batch_loss_y
+            tr_epoch_loss_y += tr_batch_loss_y                                                                          
+            tr_epoch_eval_loss_d += tr_eval_losses[1]
+            tr_epoch_eval_loss_y += tr_eval_losses[0]
             concat_tr_num_data += tr_num_data
 
             tr_pred_y_list += list(tr_predicted[:,0].cpu().detach().numpy())
@@ -108,8 +108,8 @@ def main(args):
         # Calculate Epoch loss
         tr_loss_d = tr_epoch_loss_d / concat_tr_num_data
         tr_loss_y = tr_epoch_loss_y / concat_tr_num_data
-        tr_eval_loss_d = tr_eval_losses[1] / concat_tr_num_data
-        tr_eval_loss_y = tr_eval_losses[0] / concat_tr_num_data
+        tr_eval_loss_d = tr_epoch_eval_loss_d / concat_tr_num_data
+        tr_eval_loss_y = tr_epoch_eval_loss_y / concat_tr_num_data
         log_dict.update({
             "tr_loss_d": tr_loss_d,
             "tr_loss_y": tr_loss_y,
@@ -128,7 +128,7 @@ def main(args):
         for data in val_dataloader:
             val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
                                                                                 args.scaling, val_dataset.dataset.a_y, val_dataset.dataset.b_y,
-                                                                                val_dataset.dataset.a_d, val_dataset.dataset.b_d, use_treatment=True)
+                                                                                val_dataset.dataset.a_d, val_dataset.dataset.b_d, use_treatment=use_treatment)
             val_epoch_loss_d += val_batch_loss_d
             val_epoch_loss_y += val_batch_loss_y
             concat_val_num_data += val_num_data
@@ -157,7 +157,7 @@ def main(args):
         for data in test_dataloader:
             te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth = utils.test(data, model,
                                                                                 args.scaling, test_dataset.dataset.a_y, test_dataset.dataset.b_y,
-                                                                                test_dataset.dataset.a_d, test_dataset.dataset.b_d, use_treatment=True)
+                                                                                test_dataset.dataset.a_d, test_dataset.dataset.b_d, use_treatment=use_treatment)
             te_mae_epoch_loss_d += te_mae_batch_loss_d
             te_mae_epoch_loss_y += te_mae_batch_loss_y
             te_mse_epoch_loss_d += te_mse_batch_loss_d
@@ -215,7 +215,7 @@ def main(args):
 
     #-------------------------------------------------------------------------------------
     # Evaluate counter factual [only on train set]
-    counterfactual_differences = utils.estimate_counterfactuals(model, tr_dataloader, a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, use_treatment=True, binary_t=args.binary_t)
+    counterfactual_differences = utils.estimate_counterfactuals(model, tr_dataloader, a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d, use_treatment=True)
     organized_counterfactuals = utils.organize_counterfactuals(counterfactual_differences)
     avg_cf = utils.compute_average_differences(organized_counterfactuals)
     utils.print_average_differences(avg_cf)
@@ -225,24 +225,19 @@ def parse_args():
     parser.add_argument("--embedding_dim", default=32, type=int)
     parser.add_argument("--latent_dim", default=16, type=int, help='z dimension')
     parser.add_argument("--hidden_dim", default=32, type=int, help='y,d,t layers dimension')
-<<<<<<< HEAD
-    parser.add_argument("--num_layers", default=3, type=int, help='transformer layers')
-    parser.add_argument("--pred_layers", default=1, type=int, help='y,d predictor head layers')
-    parser.add_argument("--shared_layers", default=1, type=int, help='y,d predictor featurizer layers')
-=======
     parser.add_argument("--t_embed_dim", default=8, type=int, help='t emb dimension')
     parser.add_argument("--yd_embed_dim", default=8, type=int, help='y,d emb dimension')
-    parser.add_argument("--num_layers", default=2, type=int, help='transformer layers')
+    parser.add_argument("--num_layers", default=2, type=int, help='MLP layers')
+    parser.add_argument("--transformer_num_layers", default=3, type=int, help='transformer layers')
     parser.add_argument("--pred_layers", default=1, type=int, help='y,d predictor head layers')
     parser.add_argument("--t_pred_layers", default=2, type=int, help='t predictor layers')
     parser.add_argument("--shared_layers", default=2, type=int, help='y,d predictor featurizer layers')
->>>>>>> d6cf0dc3a75581452639b1e57681ea49a2639fe0
     parser.add_argument("-n", "--num_epochs", default=30, type=int)
     parser.add_argument("--warmup_iter", default=0, type=int)
     parser.add_argument("-b", "--batch_size", default=32, type=int)
-    parser.add_argument("-lr", "--learning_rate", default=1e-3, type=float)
+    parser.add_argument("-lr", "--learning_rate", default=0.001, type=float)
     parser.add_argument("-lrd", "--learning_rate_decay", default=0.1, type=float)
-    parser.add_argument("--weight_decay", default=0, type=float)
+    parser.add_argument("--weight_decay", default=0.001, type=float)
     parser.add_argument("--drop_out", type=float, default=0.0)
     parser.add_argument("--pred_model", default="encoder", type=str, choices=["encoder", "decoder"])
     parser.add_argument("--binary_t", action='store_true',
