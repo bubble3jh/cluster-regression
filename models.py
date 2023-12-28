@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
@@ -7,6 +8,7 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer, TransformerDec
 from utils import reduction_cluster, reparametrize
 import pdb
 import warnings
+from torch.nn.modules.transformer import _get_seq_len, _detect_is_causal_mask
 
 warnings.filterwarnings("ignore", "Converting mask without torch.bool dtype to bool")
 
@@ -58,14 +60,15 @@ class Transformer(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, num_layers, num_heads, drop_out, disable_embedding):
         super(Transformer, self).__init__()
         
-        self.embedding = TableEmbedding(output_size=input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="date")
+        self.embedding = TableEmbedding(output_size=input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="none") #reduction="date")
         self.cls_token = nn.Parameter(torch.randn(1, 1, input_size))
         self.transformer_layer = nn.TransformerEncoderLayer(
             d_model=input_size,
             nhead=num_heads,
             dim_feedforward=hidden_size, 
             dropout=drop_out,
-            batch_first=True
+            batch_first=True,
+            norm_first=True
         )
         self.transformer_encoder = TransformerEncoder(self.transformer_layer, num_layers)
         self.fc = nn.Linear(hidden_size, output_size)  
@@ -86,15 +89,34 @@ class Transformer(nn.Module):
         self.fc.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
-        embedded = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
-        cls_token = self.cls_token.expand(embedded.size(0), -1, -1) 
+        if self.embedding.reduction != "none":
+            embedded, cls_token_pe = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+        else:
+            (embedded, diff_days, _), cls_token_pe = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) # embedded:(32, 124, 128)
+        
+        cls_token = self.cls_token.expand(embedded.size(0), -1, -1) + cls_token_pe.unsqueeze(0).expand(embedded.size(0), -1, -1)
         input_with_cls = torch.cat([cls_token, embedded], dim=1)
-        mask = (torch.arange(input_with_cls.size(1)).expand(input_with_cls.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        mask = ~(torch.arange(input_with_cls.size(1)).expand(input_with_cls.size(0), -1).cuda() < (val_len+1).unsqueeze(1)).cuda() # val_len + 1 ?
+        # import pdb;pdb.set_trace()
         output = self.transformer_encoder(input_with_cls, src_key_padding_mask=mask.bool())  
         cls_output = output[:, 0, :]  
         regression_output = self.fc(cls_output) 
         
         return regression_output
+    
+class SinusoidalPositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        return self.pe[:x.size(0), :]
     
 class TableEmbedding(torch.nn.Module):
     '''
@@ -107,6 +129,8 @@ class TableEmbedding(torch.nn.Module):
     def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="mean"):
         super().__init__()
         self.reduction = reduction
+        if self.reduction == "none":
+            print("do not reduce cluster")
         self.disable_embedding = disable_embedding
         self.disable_pe = disable_pe
         if not disable_embedding:
@@ -129,7 +153,7 @@ class TableEmbedding(torch.nn.Module):
         self.lookup_place  = nn.Embedding(19, emb_dim_c)
         self.lookup_add  = nn.Embedding(31, emb_dim_c)
         if not disable_pe:
-            self.positional_embedding  = nn.Embedding(5, output_size)
+            self.positional_embedding  = nn.Embedding(6, output_size)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         if not self.disable_embedding:
@@ -153,7 +177,11 @@ class TableEmbedding(torch.nn.Module):
             
         if not self.disable_pe:
             x = x + self.positional_embedding(diff_days.int().squeeze(2))
-        return reduction_cluster(x, diff_days, val_len, self.reduction)
+            # import pdb;pdb.set_trace()
+        if self.reduction == "none":   
+            return (x, diff_days, val_len), self.positional_embedding(torch.tensor([5]).cuda())
+        else:
+            return reduction_cluster(x, diff_days, val_len, self.reduction), self.positional_embedding(torch.tensor([5]).cuda())
     
 
 class CEVAEEmbedding(torch.nn.Module):
@@ -191,6 +219,7 @@ class CEVAEEmbedding(torch.nn.Module):
         self.lookup_add  = nn.Embedding(31, emb_dim)
         if not disable_pe:
             self.positional_embedding  = nn.Embedding(5, output_size)
+            # self.positional_embedding = SinusoidalPositionalEncoding(output_size)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         if not self.disable_embedding:
@@ -571,82 +600,78 @@ class CEVAE_debug(nn.Module):
         return yd
         # return torch.stack([y,d],dim=1).squeeze()
 
-class CETransformer(nn.Module):
-    def __init__(self, embedding_dim, latent_dim=64, mlp_hidden_dim=64, mlp_layers=3, transformer_layers=3, drop_out=0.0, num_heads=2, t_embed_dim=16, yd_embed_dim=16, use_raw_ydt=False, use_cls=True):
-        super(CETransformer, self).__init__()
-        self.use_raw_ydt = use_raw_ydt
-        self.use_cls = use_cls
+# class CETransformer(nn.Module):
+#     def __init__(self, embedding_dim, latent_dim=64, mlp_hidden_dim=64, mlp_layers=3, transformer_layers=3, drop_out=0.0, num_heads=2, t_embed_dim=16, yd_embed_dim=16, use_raw_ydt=False, use_cls=True):
+#         super(CETransformer, self).__init__()
+#         self.use_raw_ydt = use_raw_ydt
+#         self.use_cls = use_cls
 
-        self.x_emb = CEVAEEmbedding(output_size=embedding_dim)
+#         self.x_emb = CEVAEEmbedding(output_size=embedding_dim)
         
-        self.enc_t_embedding = nn.Linear(1, embedding_dim)
-        self.enc_yd_embedding = nn.Linear(2, embedding_dim)
+#         self.enc_t_embedding = nn.Linear(1, embedding_dim)
+#         self.enc_yd_embedding = nn.Linear(2, embedding_dim)
         
-        self.dec_t_embedding = nn.Linear(1, embedding_dim)
-        self.dec_yd_embedding = nn.Linear(2, embedding_dim)
+#         self.dec_t_embedding = nn.Linear(1, embedding_dim)
+#         self.dec_yd_embedding = nn.Linear(2, embedding_dim)
 
-        self.transformer_layer = nn.TransformerEncoderLayer(
-            d_model=embedding_dim,
-            nhead=num_heads,
-            dim_feedforward=latent_dim, 
-            dropout=drop_out,
-            batch_first=True
-        )
-        self.transformer_encoder = TransformerEncoder(self.transformer_layer, transformer_layers)
+#         self.transformer_layer = nn.TransformerEncoderLayer(
+#             d_model=embedding_dim,
+#             nhead=num_heads,
+#             dim_feedforward=latent_dim, 
+#             dropout=drop_out,
+#             batch_first=True
+#         )
+#         self.transformer_encoder = TransformerEncoder(self.transformer_layer, transformer_layers)
         
-        self.decoder_layer = TransformerDecoderLayer(
-            d_model=embedding_dim,
-            nhead=num_heads,
-            dim_feedforward=latent_dim,
-            dropout=drop_out,
-            batch_first=True
-        )
-        self.transformer_decoder = TransformerDecoder(self.decoder_layer, transformer_layers)
+#         self.decoder_layer = TransformerDecoderLayer(
+#             d_model=embedding_dim,
+#             nhead=num_heads,
+#             dim_feedforward=latent_dim,
+#             dropout=drop_out,
+#             batch_first=True
+#         )
+#         self.transformer_decoder = TransformerDecoder(self.decoder_layer, transformer_layers)
 
-        self.cls_token = nn.Parameter(torch.randn(1, 1, embedding_dim))
+#         # do not use token
+#         # self.cls_token = nn.Parameter(torch.randn(1, 1, embedding_dim))
         
-        self.enc_t_fc = MLP(input_dim=embedding_dim, hidden_dim=mlp_hidden_dim, output_dim=1, num_layers=mlp_layers, dropout_rate=drop_out)
-        self.enc_yd_fc = MLP(input_dim=embedding_dim + 1 if use_raw_ydt else embedding_dim + t_embed_dim, hidden_dim=mlp_hidden_dim, output_dim=2, num_layers=mlp_layers, dropout_rate=drop_out)
+#         self.enc_t_fc = MLP(input_dim=embedding_dim, hidden_dim=mlp_hidden_dim, output_dim=1, num_layers=mlp_layers, dropout_rate=drop_out)
+#         self.enc_yd_fc = MLP(input_dim=embedding_dim + 1 if use_raw_ydt else embedding_dim + t_embed_dim, hidden_dim=mlp_hidden_dim, output_dim=2, num_layers=mlp_layers, dropout_rate=drop_out)
         
-        self.dec_t_fc = MLP(input_dim=embedding_dim, hidden_dim=mlp_hidden_dim, output_dim=1, num_layers=mlp_layers, dropout_rate=drop_out)
-        self.dec_yd_fc = MLP(input_dim=embedding_dim + 1 if use_raw_ydt else embedding_dim + t_embed_dim, hidden_dim=mlp_hidden_dim, output_dim=2, num_layers=mlp_layers, dropout_rate=drop_out)
+#         self.dec_t_fc = MLP(input_dim=embedding_dim, hidden_dim=mlp_hidden_dim, output_dim=1, num_layers=mlp_layers, dropout_rate=drop_out)
+#         self.dec_yd_fc = MLP(input_dim=embedding_dim + 1 if use_raw_ydt else embedding_dim + t_embed_dim, hidden_dim=mlp_hidden_dim, output_dim=2, num_layers=mlp_layers, dropout_rate=drop_out)
 
-    def generate_square_subsequent_mask(self, sz):
-        mask = torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
-        return mask
+#     def generate_square_subsequent_mask(self, sz):
+#         mask = torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+#         return mask
     
-    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff, t_gt=None):
-        # TODO: use cls must be true in this code
-        x = self.x_emb(cont_p, cont_c, cat_p, cat_c, val_len, diff)
+#     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff, t_gt=None):
+#         # TODO: use cls must be true in this code
+#         ori_x = self.x_emb(cont_p, cont_c, cat_p, cat_c, val_len, diff)
 
-        ori_x = cls_token = self.cls_token.expand(x.size(0), -1, -1) 
-        input_with_cls = torch.cat([cls_token, x], dim=1)
-        if not self.use_cls:
-            ori_x = input_with_cls
-        
-        enc_t_pred = self.enc_t_fc(ori_x)
-        enc_t_emb = self.enc_t_embedding(enc_t_pred)
-        enc_yd_pred = self.enc_yd_fc(ori_x + enc_t_emb)
+#         enc_t_pred = self.enc_t_fc(ori_x)
+#         enc_t_emb = self.enc_t_embedding(enc_t_pred)
+#         enc_yd_pred = self.enc_yd_fc(ori_x + enc_t_emb) # cannot sum two embedding, have to be resolved
 
-        src_mask = (torch.arange(input_with_cls.size(1)).expand(input_with_cls.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+#         src_mask = (torch.arange(ori_x.size(1)).expand(ori_x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
 
-        encoder_output = self.transformer_encoder(input_with_cls, src_key_padding_mask=src_mask)
+#         encoder_output = self.transformer_encoder(input_with_cls, src_key_padding_mask=src_mask)
 
-        # use cls embedding as Z  
-        z = encoder_output[:, 0, :] 
-        if not self.use_cls:
-            z = encoder_output
+#         # use cls embedding as Z  
+#         z = encoder_output[:, 0, :] 
+#         if not self.use_cls:
+#             z = encoder_output
 
-        tgt_length = input_with_cls.size(1)
-        tgt_mask = self.generate_square_subsequent_mask(tgt_length).cuda()
+#         tgt_length = input_with_cls.size(1)
+#         tgt_mask = self.generate_square_subsequent_mask(tgt_length).cuda()
 
-        # use decoder output as x_hat
-        decoder_output = self.transformer_decoder(input_with_cls, encoder_output, tgt_mask=tgt_mask, memory_key_padding_mask=src_mask, tgt_key_padding_mask=src_mask)
-        recon_x = decoder_output[:, 0, :]
-        if not self.use_cls:
-            recon_x = decoder_output
+#         # use decoder output as x_hat
+#         decoder_output = self.transformer_decoder(input_with_cls, encoder_output, tgt_mask=tgt_mask, memory_key_padding_mask=src_mask, tgt_key_padding_mask=src_mask)
+#         recon_x = decoder_output[:, 0, :]
+#         if not self.use_cls:
+#             recon_x = decoder_output
 
-        return z, recon_x, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), warm_yd
+#         return z, recon_x, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), warm_yd
     
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers, dropout_rate=0.5):
@@ -675,3 +700,213 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+class customTransformerEncoder(TransformerEncoder):
+    def __init__(self, encoder_layer, num_layers, d_model, drop_out, pred_layers=1, norm=None, enable_nested_tensor=True, mask_check=True):
+        super().__init__(encoder_layer, num_layers, norm, enable_nested_tensor, mask_check)
+        self.x2t = MLP(d_model,d_model//2, 1, num_layers=pred_layers) # Linear
+        self.t_emb = MLP(1,d_model//2, d_model, num_layers=pred_layers) # Linear
+        self.xt2yd = MLP(d_model,d_model//2, 2, num_layers=pred_layers) # Linear
+        self.yd_emb = MLP(2,d_model//2, d_model, num_layers=pred_layers) # Linear
+
+    def forward(self, src: Tensor, mask: Tensor | None = None, src_key_padding_mask: Tensor | None = None, is_causal: bool | None = None) -> Tensor:
+        r"""Pass the input through the encoder layers in turn.
+
+        Args:
+            src: the sequence to the encoder (required).
+            mask: the mask for the src sequence (optional).
+            src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as ``mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+
+        Shape:
+            see the docs in Transformer class.
+        """
+        src_key_padding_mask = F._canonical_mask(
+            mask=src_key_padding_mask,
+            mask_name="src_key_padding_mask",
+            other_type=F._none_or_dtype(mask),
+            other_name="mask",
+            target_type=src.dtype
+        )
+
+        mask = F._canonical_mask(
+            mask=mask,
+            mask_name="mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
+        )
+        output = src
+        convert_to_nested = False
+        first_layer = self.layers[0]
+        src_key_padding_mask_for_layers = src_key_padding_mask
+        # why_not_sparsity_fast_path = ''
+        # str_first_layer = "self.layers[0]"
+        batch_first = first_layer.self_attn.batch_first
+        # if not hasattr(self, "use_nested_tensor"):
+        #     why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
+        # elif not self.use_nested_tensor:
+        #     why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
+        # elif first_layer.training:
+        #     why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
+        # elif not src.dim() == 3:
+        #     why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
+        # elif src_key_padding_mask is None:
+        #     why_not_sparsity_fast_path = "src_key_padding_mask was None"
+        # elif (((not hasattr(self, "mask_check")) or self.mask_check)
+        #         and not torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
+        #     why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
+        # elif output.is_nested:
+        #     why_not_sparsity_fast_path = "NestedTensor input is not supported"
+        # elif mask is not None:
+        #     why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
+        # elif torch.is_autocast_enabled():
+        #     why_not_sparsity_fast_path = "autocast is enabled"
+
+        # if not why_not_sparsity_fast_path:
+        #     tensor_args = (
+        #         src,
+        #         first_layer.self_attn.in_proj_weight,
+        #         first_layer.self_attn.in_proj_bias,
+        #         first_layer.self_attn.out_proj.weight,
+        #         first_layer.self_attn.out_proj.bias,
+        #         first_layer.norm1.weight,
+        #         first_layer.norm1.bias,
+        #         first_layer.norm2.weight,
+        #         first_layer.norm2.bias,
+        #         first_layer.linear1.weight,
+        #         first_layer.linear1.bias,
+        #         first_layer.linear2.weight,
+        #         first_layer.linear2.bias,
+        #     )
+        #     _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
+        #     if torch.overrides.has_torch_function(tensor_args):
+        #         why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
+        #     elif src.device.type not in _supported_device_type:
+        #         why_not_sparsity_fast_path = f"src device is neither one of {_supported_device_type}"
+        #     elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
+        #         why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
+        #                                       "input/output projection weights or biases requires_grad")
+
+        #     if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
+        #         convert_to_nested = True
+        #         output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
+        #         src_key_padding_mask_for_layers = None
+
+        seq_len = _get_seq_len(src, batch_first)
+        is_causal = _detect_is_causal_mask(mask, is_causal, seq_len)
+
+        for idx, mod in enumerate(self.layers):
+            output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
+            if idx == 0:
+                output_avg = torch.mean(output, dim=1)
+                t = self.x2t(output_avg)
+                t_emb = self.t_emb(t)
+            elif idx == 1:
+                output = output + t_emb.unsqueeze(1)
+                output_avg = torch.mean(output, dim=1)
+                yd = self.xt2yd(output_avg)
+                yd_emb = self.yd_emb(yd)
+            elif idx == 2:
+                output = output + yd_emb.unsqueeze(1)
+                None
+
+        if convert_to_nested:
+            output = output.to_padded_tensor(0., src.size())
+
+        if self.norm is not None:
+            output = self.norm(output)
+
+        return output, t, yd
+
+
+class CETransformer(nn.Module):
+    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5):
+        super(CETransformer, self).__init__()
+
+        self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="date")
+        # self.pos_encoder = PositionalEncoding(d_model, dropout)
+        encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, activation='gelu')
+        self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers)
+        decoder_layers = TransformerDecoderLayer(d_model, nhead, d_hid, dropout, batch_first=True)
+        self.transformer_decoder = TransformerDecoder(decoder_layers, nlayers)
+        self.d_model = d_model
+
+        self.z2t = MLP(d_model, d_model//2, 1, num_layers=pred_layers) # Linear
+        self.t_emb = MLP(1, d_model//2, d_model, num_layers=pred_layers) # Linear
+        self.zt2yd = MLP(d_model, d_model//2, 2, num_layers=pred_layers) # Linear
+
+        self.init_weights()
+
+    def generate_square_subsequent_mask(self, sz):
+        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        return mask
+
+    # def init_weights(self):
+    #     initrange = 0.1
+    #     self.encoder.weight.data.uniform_(-initrange, initrange)
+    #     self.decoder.bias.data.zero_()
+    #     self.decoder.weight.data.uniform_(-initrange, initrange)
+
+    def init_weights(self):
+        initrange = 0.1
+        # For embedding layers
+        if hasattr(self.embedding, 'weight'):
+            self.embedding.weight.data.uniform_(-initrange, initrange)
+        
+        # For transformer encoder and decoder
+        for module in [self.transformer_encoder, self.transformer_decoder]:
+            for param in module.parameters():
+                if param.dim() > 1:
+                    nn.init.xavier_uniform_(param)
+        
+        # For MLP layers
+        for mlp in [self.z2t, self.t_emb, self.zt2yd]:
+            for layer in mlp.layers:
+                if isinstance(layer, nn.Linear):
+                    layer.weight.data.uniform_(-initrange, initrange)
+                    if layer.bias is not None:
+                        layer.bias.data.zero_()
+
+    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
+        # Encoder
+        x = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) #* math.sqrt(self.d_model)
+        # src_mask = (torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        src_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+
+        # import pdb;pdb.set_trace()
+        tgt_mask = self.generate_square_subsequent_mask(x.size(1)).cuda()
+        # import pdb;pdb.set_trace() # x : torch.Size([32, 5, 32])
+        # Z
+        z, enc_t, enc_yd = self.transformer_encoder(x, src_key_padding_mask=src_mask)
+        z_avg = torch.mean(z, dim=1)
+        dec_t = self.z2t(z_avg)
+        t_emb = self.t_emb(dec_t)
+        dec_yd = self.zt2yd(z_avg + t_emb)
+        # Decoder
+        x_recon = self.transformer_decoder(x, z, tgt_mask, tgt_key_padding_mask=src_mask, memory_key_padding_mask=src_mask)
+        return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t)
+
+# class PositionalEncoding(nn.Module):
+#     def __init__(self, d_model, dropout=0.5, max_len=5000):
+#         super(PositionalEncoding, self).__init__()
+#         self.dropout = nn.Dropout(p=dropout)
+
+#         position = torch.arange(max_len).unsqueeze(1)
+#         div_term = torch.exp(torch.arange(0, d_model, 2) * -(math.log(10000.0) / d_model))
+#         pe = torch.zeros(max_len, 1, d_model)
+#         pe[:, 0, 0::2] = torch.sin(position * div_term)
+#         pe[:, 0, 1::2] = torch.cos(position * div_term)
+#         self.register_buffer('pe', pe)
+
+#     def forward(self, x):
+#         x = x + self.pe[:x.size(0)]
+#         return self.dropout(x)
