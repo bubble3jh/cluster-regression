@@ -69,6 +69,14 @@ parser.add_argument(
     "--beta",
     type=float, default=0.5
 )
+
+parser.add_argument(
+    "--use_treatment",
+    type=bool, default=False
+)
+
+parser.add_argument('--shift', action='store_true')
+
 #----------------------------------------------------------------
 
 
@@ -76,7 +84,7 @@ parser.add_argument(
 parser.add_argument(
     "--model",
     type=str, default='transformer',
-    choices=["transformer", "linear", "ridge", "mlp", "svr", "rfr"],
+    choices=["cet", "transformer", "linear", "ridge", "mlp", "svr", "rfr"],
     help="model name (default : transformer)")
 
 parser.add_argument("--save_path",
@@ -91,8 +99,8 @@ parser.add_argument(
 
 parser.add_argument(
     "--hidden_dim",
-    type=int, default=64,
-    help="DL model hidden size (default : 64)"
+    type=int, default=128,
+    help="DL model hidden size (default : 128)"
 )
 
 parser.add_argument(
@@ -156,6 +164,8 @@ parser.add_argument("--scheduler", type=str, default='cos_anneal', choices=['con
 
 parser.add_argument("--t_max", type=int, default=200,
                 help="T_max for Cosine Annealing Learning Rate Scheduler (Default : 200)")
+
+parser.add_argument("--lambdas", nargs='+', type=float, default=[1.0, 1.0, 1.0], help='encoder loss + decoder loss + reconstruction loss')
 #----------------------------------------------------------------
 
 parser.add_argument("--lamb", type=float, default=0.0,
@@ -188,7 +198,7 @@ cutdates_num=5
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
 for i in range(0, cutdates_num+1):
     data = pd.read_csv(args.data_path+f"data_cut_{i}.csv")
-    dataset = utils.Tabledata(args, data, args.scaling)
+    dataset = utils.Tabledata(args, data, args.scaling, args.model=='cet')
     train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
     tr_datasets.append(train_dataset)
     val_datasets.append(val_dataset)
@@ -218,6 +228,11 @@ if args.model == 'transformer':
                                num_heads=args.num_heads, 
                                drop_out=args.drop_out, 
                                disable_embedding=args.disable_embedding).to(args.device)
+    
+if args.model == 'cet':
+    model = models.CETransformer(d_model=args.num_features, nhead=args.num_heads, d_hid=args.hidden_dim, 
+                          nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift).to(args.device) # TODO: Hard coded for transformer layers
+    args.use_treatment=True
    
 elif args.model == "mlp":
     model = models.MLPRegressor(input_size=args.num_features,
@@ -302,7 +317,8 @@ for epoch in range(1, args.epochs + 1):
         for itr, data in enumerate(tr_dataloader):
             ## Training phase
             tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, tr_eval_loss_y, tr_eval_loss_d = utils.train(data, model, optimizer, criterion, epoch, lamb=args.lamb, eval_criterion=eval_criterion,
-                                                                                                                                       a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d)
+                                                                                                                                       a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d,
+                                                                                                                                       use_treatment=args.use_treatment, lambdas=args.lambdas)
             tr_epoch_loss_d += tr_batch_loss_d
             tr_epoch_loss_y += tr_batch_loss_y
             tr_epoch_eval_loss_d += tr_eval_loss_d
@@ -333,7 +349,7 @@ for epoch in range(1, args.epochs + 1):
             
             val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid(data, model, eval_criterion,
                                                                                 args.scaling, val_datasets[i].dataset.a_y, val_datasets[i].dataset.b_y,
-                                                                                val_datasets[i].dataset.a_d, val_datasets[i].dataset.b_d)
+                                                                                val_datasets[i].dataset.a_d, val_datasets[i].dataset.b_d, use_treatment=args.use_treatment)
             val_epoch_loss_d += val_batch_loss_d
             val_epoch_loss_y += val_batch_loss_y
             concat_val_num_data += val_num_data
@@ -359,7 +375,7 @@ for epoch in range(1, args.epochs + 1):
         for itr, data in enumerate(test_dataloaders[i]):
             te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth = utils.test(data, model,
                                                                                 args.scaling, test_datasets[i].dataset.a_y, test_datasets[i].dataset.b_y,
-                                                                                test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d)
+                                                                                test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d, use_treatment=args.use_treatment)
             te_mae_epoch_loss_d += te_mae_batch_loss_d
             te_mae_epoch_loss_y += te_mae_batch_loss_y
             te_mse_epoch_loss_d += te_mse_batch_loss_d
@@ -448,7 +464,11 @@ for epoch in range(1, args.epochs + 1):
         "concat/test_total (rmse)": test_rmse_d_list[0] + test_rmse_y_list[0],
         "concat/test_d (rmse)": test_rmse_d_list[0],
         "concat/test_y (rmse)": test_rmse_y_list[0],
-        "setting/lr": lr
+        "setting/lr": lr,
+        # "pred/tr_pred_y": wandb.Histogram(tr_pred_y_list),
+        # "gt/tr_gt_y": wandb.Histogram(tr_gt_y_list),
+        # "pred/tr_pred_d": wandb.Histogram(tr_pred_d_list),
+        # "gt/tr_gt_d": wandb.Histogram(tr_gt_d_list)
     }
         for name, param in model.named_parameters():
             wandb_log[f"param_stats/{name}_min"] = param.data.min().item()

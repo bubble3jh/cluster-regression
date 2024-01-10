@@ -192,8 +192,9 @@ class CEVAEEmbedding(torch.nn.Module):
         reduction : "mean" : cluster 별 평균으로 reduction
                     "date" : cluster 내 date 평균으로 reduction
     '''
-    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="date"):
+    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="date", shift=False):
         super().__init__()
+        self.shift = shift
         self.reduction = reduction
         self.disable_embedding = disable_embedding
         self.disable_pe = disable_pe
@@ -218,7 +219,10 @@ class CEVAEEmbedding(torch.nn.Module):
         self.lookup_place  = nn.Embedding(19, emb_dim)
         self.lookup_add  = nn.Embedding(31, emb_dim)
         if not disable_pe:
-            self.positional_embedding  = nn.Embedding(5, output_size)
+            if shift:
+                self.positional_embedding  = nn.Embedding(6, output_size)
+            else:
+                self.positional_embedding  = nn.Embedding(5, output_size)
             # self.positional_embedding = SinusoidalPositionalEncoding(output_size)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
@@ -243,7 +247,14 @@ class CEVAEEmbedding(torch.nn.Module):
             
         if not self.disable_pe:
             x = x + self.positional_embedding(diff_days.int().squeeze(2))
-        return reduction_cluster(x, diff_days, val_len, self.reduction)
+        # return reduction_cluster(x, diff_days, val_len, self.reduction)
+        if self.reduction == "none":   
+            if self.shift:
+                return (x, diff_days, val_len), self.positional_embedding(torch.tensor([5]).cuda())
+            else:
+                return (x, diff_days, val_len), None
+        else:
+            return reduction_cluster(x, diff_days, val_len, self.reduction)
     
 
 class CEVAETransformer(nn.Module):
@@ -828,12 +839,12 @@ class customTransformerEncoder(TransformerEncoder):
 
 
 class CETransformer(nn.Module):
-    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5):
+    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False):
         super(CETransformer, self).__init__()
-
-        self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="date")
+        self.shift = shift
+        self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="none", shift= shift)
         # self.pos_encoder = PositionalEncoding(d_model, dropout)
-        encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, activation='gelu')
+        encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
         self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers)
         decoder_layers = TransformerDecoderLayer(d_model, nhead, d_hid, dropout, batch_first=True)
         self.transformer_decoder = TransformerDecoder(decoder_layers, nlayers)
@@ -843,18 +854,17 @@ class CETransformer(nn.Module):
         self.t_emb = MLP(1, d_model//2, d_model, num_layers=pred_layers) # Linear
         self.zt2yd = MLP(d_model, d_model//2, 2, num_layers=pred_layers) # Linear
 
-        self.init_weights()
+        # self.init_weights()
 
+    # def generate_square_subsequent_mask(self, sz):
+    #     mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+    #     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+    #     return mask
+    
     def generate_square_subsequent_mask(self, sz):
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        mask = mask.masked_fill(mask == 0, True).masked_fill(mask == 1, False)
         return mask
-
-    # def init_weights(self):
-    #     initrange = 0.1
-    #     self.encoder.weight.data.uniform_(-initrange, initrange)
-    #     self.decoder.bias.data.zero_()
-    #     self.decoder.weight.data.uniform_(-initrange, initrange)
 
     def init_weights(self):
         initrange = 0.1
@@ -878,11 +888,15 @@ class CETransformer(nn.Module):
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
         # Encoder
-        x = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) #* math.sqrt(self.d_model)
+        if self.embedding.reduction != "none":
+            x = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+        else:
+            (x, diff_days, _), start_tok = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) # embedded:(32, 124, 128)
+        
+        # x = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) #* math.sqrt(self.d_model)
         # src_mask = (torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
         src_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
-
-        # import pdb;pdb.set_trace()
+        
         tgt_mask = self.generate_square_subsequent_mask(x.size(1)).cuda()
         # import pdb;pdb.set_trace() # x : torch.Size([32, 5, 32])
         # Z
@@ -892,7 +906,14 @@ class CETransformer(nn.Module):
         t_emb = self.t_emb(dec_t)
         dec_yd = self.zt2yd(z_avg + t_emb)
         # Decoder
-        x_recon = self.transformer_decoder(x, z, tgt_mask, tgt_key_padding_mask=src_mask, memory_key_padding_mask=src_mask)
+        if self.shift:
+            start_tok = start_tok.repeat(x.size(0), 1).unsqueeze(1)
+            x_in = torch.cat([start_tok, x], dim=1)
+            tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < (val_len + 1).unsqueeze(1)).cuda()
+        else :
+            x_in = x
+            tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        x_recon = self.transformer_decoder(tgt = x_in, memory = z, tgt_mask = tgt_mask, memory_mask = None, tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=src_mask)
         return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t)
 
 # class PositionalEncoding(nn.Module):

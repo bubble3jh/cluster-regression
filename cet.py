@@ -90,7 +90,7 @@ def main(args):
     model = CETransformer(d_model=args.embedding_dim, nhead=args.num_heads, d_hid=args.latent_dim, 
                           nlayers=args.transformer_num_layers, dropout=args.drop_out, pred_layers=args.pred_layers).to(device)
     # print(model)
-    optimizer = torch.optim.RAdam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     print(optimizer)
     criterion = torch.nn.MSELoss(); aux_criterion = torch.nn.CrossEntropyLoss()
     print("Successfully load model!")

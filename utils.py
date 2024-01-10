@@ -208,14 +208,11 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         
         # (warmup_loss_y, warmup_loss_d), (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
         (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
-        if True: # TODO: hardcode
+        if False: # TODO: hardcode
             loss_y = enc_loss_y
             loss_d = enc_loss_d
             out = enc_yd_pred
             dec_out = dec_yd_pred
-            # loss_y = warmup_loss_y
-            # loss_d = warmup_loss_d
-            # out = warm_yd
         else:
             loss_y = dec_loss_y
             loss_d = dec_loss_d
@@ -259,14 +256,14 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
         dec_yd_pred, dec_t_pred = dec_preds
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
         # (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
-        if True: # TODO: hardcode
+        if False: # TODO: hardcode
             # loss_y = enc_loss_y
             # loss_d = enc_loss_d
             out = enc_yd_pred
             # out = dec_yd_pred
         else:
-            loss_y = dec_loss_y
-            loss_d = dec_loss_d
+            # loss_y = dec_loss_y
+            # loss_d = dec_loss_d
             out = dec_yd_pred
 
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
@@ -298,14 +295,14 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
         dec_yd_pred, dec_t_pred = dec_preds
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
         # (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
-        if True: # TODO: hardcode
+        if False: # TODO: hardcode
             # loss_y = enc_loss_y
             # loss_d = enc_loss_d
             out = enc_yd_pred
             # out = dec_yd_pred
         else:
-            loss_y = dec_loss_y
-            loss_d = dec_loss_d
+            # loss_y = dec_loss_y
+            # loss_d = dec_loss_d
             out = dec_yd_pred
         
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
