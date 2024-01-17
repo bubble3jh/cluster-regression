@@ -205,6 +205,7 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
                                               #x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, criterion, lamdas
         loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], None, None, t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas)
+        # loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, 0, 0, dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], None, None, t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas)
         
         # (warmup_loss_y, warmup_loss_d), (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
         (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
@@ -304,7 +305,8 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
             # loss_y = dec_loss_y
             # loss_d = dec_loss_d
             out = dec_yd_pred
-        
+    if out.shape == torch.Size([2]):
+        out = out.unsqueeze(0)
     pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
     # MAE
     mae_y = criterion_mae(pred_y, gt_y)
@@ -721,7 +723,7 @@ def cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, d
     dec_loss = dec_y_loss + dec_d_loss + dec_t_loss
 
     # Reconstruction Loss
-    recon_loss = criterion(x_reconstructed, x)
+    #recon_loss = criterion(x_reconstructed, x)
 
     # Encoder Prediction Loss
     # enc_y_loss = nan_filtered_loss(enc_y_pred, y, criterion)
@@ -738,6 +740,5 @@ def cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, d
     # # Reconstruction Loss
     # recon_loss = nan_filtered_loss(x_reconstructed, x, criterion)
 
-    total_loss = lambdas[0]*enc_loss + lambdas[1]*dec_loss + lambdas[2]*recon_loss
-    # import pdb;pdb.set_trace()
-    return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss)
+    total_loss = lambdas[0]*enc_loss + lambdas[1]*dec_loss #+ lambdas[2]*recon_loss
+    return total_loss, (0, 0), (dec_y_loss, dec_d_loss)

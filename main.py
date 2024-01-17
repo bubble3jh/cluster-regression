@@ -27,6 +27,8 @@ parser.add_argument("--eval_model", type=str, default=None,
 parser.add_argument("--ignore_wandb", action='store_true',
         help = "Stop using wandb (Default : False)")
 
+parser.add_argument("--run_group", type=str, default="default")
+
 parser.add_argument("--save_pred", action='store_true',
         help = "Save ground truth and prediction as csv (Default : False)")
 parser.add_argument(
@@ -105,8 +107,8 @@ parser.add_argument(
 
 parser.add_argument(
     "--num_layers",
-    type=int, default=3,
-    help="DL model layer num (default : 3)"
+    type=int, default=1,
+    help="DL model layer num (default : 1)"
 )
 
 parser.add_argument(
@@ -129,6 +131,10 @@ parser.add_argument(
 
 parser.add_argument("--disable_embedding", action='store_true',
         help = "Disable embedding to use raw data (Default : False)")
+
+
+parser.add_argument("--unidir", action='store_true',
+        help = "Unidirectional attention to transformer encoder (Default : False)")
 
 #----------------------------------------------------------------
 
@@ -185,7 +191,7 @@ print(f"Device : {args.device}")
 
 ## Set wandb ---------------------------------------------------------------------------
 if args.ignore_wandb == False:
-    wandb.init(entity="mlai_medical_ai", project="cluster-regression")
+    wandb.init(entity="mlai_medical_ai", project="cluster-regression", group=args.run_group)
     wandb.config.update(args)
     if args.disable_embedding:
         wandb.run.name = f"raw_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}"
@@ -231,7 +237,8 @@ if args.model == 'transformer':
     
 if args.model == 'cet':
     model = models.CETransformer(d_model=args.num_features, nhead=args.num_heads, d_hid=args.hidden_dim, 
-                          nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift).to(args.device) # TODO: Hard coded for transformer layers
+                          nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
+                          unidir=args.unidir).to(args.device) # TODO: Hard coded for transformer layers
     args.use_treatment=True
    
 elif args.model == "mlp":

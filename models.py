@@ -713,12 +713,13 @@ class MLP(nn.Module):
         return self.layers(x)
 
 class customTransformerEncoder(TransformerEncoder):
-    def __init__(self, encoder_layer, num_layers, d_model, drop_out, pred_layers=1, norm=None, enable_nested_tensor=True, mask_check=True):
+    def __init__(self, encoder_layer, num_layers, d_model, drop_out, pred_layers=1, norm=None, enable_nested_tensor=True, mask_check=True, seq_wise=False):
         super().__init__(encoder_layer, num_layers, norm, enable_nested_tensor, mask_check)
         self.x2t = MLP(d_model,d_model//2, 1, num_layers=pred_layers) # Linear
         self.t_emb = MLP(1,d_model//2, d_model, num_layers=pred_layers) # Linear
         self.xt2yd = MLP(d_model,d_model//2, 2, num_layers=pred_layers) # Linear
         self.yd_emb = MLP(2,d_model//2, d_model, num_layers=pred_layers) # Linear
+        self.seq_wise = seq_wise
 
     def forward(self, src: Tensor, mask: Tensor | None = None, src_key_padding_mask: Tensor | None = None, is_causal: bool | None = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
@@ -758,58 +759,58 @@ class customTransformerEncoder(TransformerEncoder):
         convert_to_nested = False
         first_layer = self.layers[0]
         src_key_padding_mask_for_layers = src_key_padding_mask
-        # why_not_sparsity_fast_path = ''
-        # str_first_layer = "self.layers[0]"
+        why_not_sparsity_fast_path = ''
+        str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
-        # if not hasattr(self, "use_nested_tensor"):
-        #     why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
-        # elif not self.use_nested_tensor:
-        #     why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
-        # elif first_layer.training:
-        #     why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
-        # elif not src.dim() == 3:
-        #     why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
-        # elif src_key_padding_mask is None:
-        #     why_not_sparsity_fast_path = "src_key_padding_mask was None"
-        # elif (((not hasattr(self, "mask_check")) or self.mask_check)
-        #         and not torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
-        #     why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
-        # elif output.is_nested:
-        #     why_not_sparsity_fast_path = "NestedTensor input is not supported"
-        # elif mask is not None:
-        #     why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
-        # elif torch.is_autocast_enabled():
-        #     why_not_sparsity_fast_path = "autocast is enabled"
+        if not hasattr(self, "use_nested_tensor"):
+            why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
+        elif not self.use_nested_tensor:
+            why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
+        elif first_layer.training:
+            why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
+        elif not src.dim() == 3:
+            why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
+        elif src_key_padding_mask is None:
+            why_not_sparsity_fast_path = "src_key_padding_mask was None"
+        elif (((not hasattr(self, "mask_check")) or self.mask_check)
+                and not torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
+            why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
+        elif output.is_nested:
+            why_not_sparsity_fast_path = "NestedTensor input is not supported"
+        elif mask is not None:
+            why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
+        elif torch.is_autocast_enabled():
+            why_not_sparsity_fast_path = "autocast is enabled"
 
-        # if not why_not_sparsity_fast_path:
-        #     tensor_args = (
-        #         src,
-        #         first_layer.self_attn.in_proj_weight,
-        #         first_layer.self_attn.in_proj_bias,
-        #         first_layer.self_attn.out_proj.weight,
-        #         first_layer.self_attn.out_proj.bias,
-        #         first_layer.norm1.weight,
-        #         first_layer.norm1.bias,
-        #         first_layer.norm2.weight,
-        #         first_layer.norm2.bias,
-        #         first_layer.linear1.weight,
-        #         first_layer.linear1.bias,
-        #         first_layer.linear2.weight,
-        #         first_layer.linear2.bias,
-        #     )
-        #     _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
-        #     if torch.overrides.has_torch_function(tensor_args):
-        #         why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-        #     elif src.device.type not in _supported_device_type:
-        #         why_not_sparsity_fast_path = f"src device is neither one of {_supported_device_type}"
-        #     elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
-        #         why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
-        #                                       "input/output projection weights or biases requires_grad")
+        if not why_not_sparsity_fast_path:
+            tensor_args = (
+                src,
+                first_layer.self_attn.in_proj_weight,
+                first_layer.self_attn.in_proj_bias,
+                first_layer.self_attn.out_proj.weight,
+                first_layer.self_attn.out_proj.bias,
+                first_layer.norm1.weight,
+                first_layer.norm1.bias,
+                first_layer.norm2.weight,
+                first_layer.norm2.bias,
+                first_layer.linear1.weight,
+                first_layer.linear1.bias,
+                first_layer.linear2.weight,
+                first_layer.linear2.bias,
+            )
+            _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
+            if torch.overrides.has_torch_function(tensor_args):
+                why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
+            elif src.device.type not in _supported_device_type:
+                why_not_sparsity_fast_path = f"src device is neither one of {_supported_device_type}"
+            elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
+                why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
+                                              "input/output projection weights or biases requires_grad")
 
-        #     if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
-        #         convert_to_nested = True
-        #         output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
-        #         src_key_padding_mask_for_layers = None
+            if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
+                convert_to_nested = True
+                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
+                src_key_padding_mask_for_layers = None
 
         seq_len = _get_seq_len(src, batch_first)
         is_causal = _detect_is_causal_mask(mask, is_causal, seq_len)
@@ -827,7 +828,6 @@ class customTransformerEncoder(TransformerEncoder):
                 yd_emb = self.yd_emb(yd)
             elif idx == 2:
                 output = output + yd_emb.unsqueeze(1)
-                None
 
         if convert_to_nested:
             output = output.to_padded_tensor(0., src.size())
@@ -839,17 +839,21 @@ class customTransformerEncoder(TransformerEncoder):
 
 
 class CETransformer(nn.Module):
-    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False):
+    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False):
         super(CETransformer, self).__init__()
         self.shift = shift
+        self.unidir = unidir
         self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="none", shift= shift)
         # self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
-        self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers)
-        decoder_layers = TransformerDecoderLayer(d_model, nhead, d_hid, dropout, batch_first=True)
+        self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers, seq_wise=seq_wise)
+        # self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
+        decoder_layers = TransformerDecoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
         self.transformer_decoder = TransformerDecoder(decoder_layers, nlayers)
-        self.d_model = d_model
+        self.max_pool = nn.MaxPool1d(kernel_size=124, stride=1)
 
+        self.d_model = d_model
+        
         self.z2t = MLP(d_model, d_model//2, 1, num_layers=pred_layers) # Linear
         self.t_emb = MLP(1, d_model//2, d_model, num_layers=pred_layers) # Linear
         self.zt2yd = MLP(d_model, d_model//2, 2, num_layers=pred_layers) # Linear
@@ -895,26 +899,42 @@ class CETransformer(nn.Module):
         
         # x = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) #* math.sqrt(self.d_model)
         # src_mask = (torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
-        src_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        src_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        src_mask = self.generate_square_subsequent_mask(x.size(1)).cuda() if self.unidir else None
         
-        tgt_mask = self.generate_square_subsequent_mask(x.size(1)).cuda()
-        # import pdb;pdb.set_trace() # x : torch.Size([32, 5, 32])
-        # Z
-        z, enc_t, enc_yd = self.transformer_encoder(x, src_key_padding_mask=src_mask)
-        z_avg = torch.mean(z, dim=1)
-        dec_t = self.z2t(z_avg)
+        # Z ------
+        # CETransformer encoder
+        z, enc_t, enc_yd = self.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        if self.unidir:
+            idx = val_len - 1
+            z = z[torch.arange(z.size(0)), idx] # padding 이 아닌값에 해당하는 seq중 마지막 값 사용
+        
+        # Baseline Transformer encoder
+        # z = self.transformer_encoder(x, src_key_padding_mask=src_mask)
+        
+        # z_avg = torch.mean(z, dim=1)                   # Z Mean
+        if self.unidir:
+            z_avg = z                                      # Z uni-directional
+        else:
+            z_avg = self.max_pool(z.transpose(1, 2))         # Z Maxpool
+        
+        dec_t = self.z2t(z_avg.squeeze())
         t_emb = self.t_emb(dec_t)
-        dec_yd = self.zt2yd(z_avg + t_emb)
-        # Decoder
-        if self.shift:
-            start_tok = start_tok.repeat(x.size(0), 1).unsqueeze(1)
-            x_in = torch.cat([start_tok, x], dim=1)
-            tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < (val_len + 1).unsqueeze(1)).cuda()
-        else :
-            x_in = x
-            tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
-        x_recon = self.transformer_decoder(tgt = x_in, memory = z, tgt_mask = tgt_mask, memory_mask = None, tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=src_mask)
-        return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t)
+        
+        # Linear Decoder
+        dec_yd = self.zt2yd(z_avg.squeeze() + t_emb)
+        
+        # Transformer Decoder
+        # if self.shift:
+        #     start_tok = start_tok.repeat(x.size(0), 1).unsqueeze(1)
+        #     x_in = torch.cat([start_tok, x], dim=1)
+        #     tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < (val_len + 1).unsqueeze(1)).cuda()
+        # else :
+        #     x_in = x
+        #     tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        # x_recon = self.transformer_decoder(tgt = x_in, memory = z, tgt_mask = tgt_mask, memory_mask = None, tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=src_mask)
+        # return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t)
+        return x, torch.zeros([dec_yd.size(0),124, 128]), (enc_yd, enc_t), (dec_yd, dec_t)
 
 # class PositionalEncoding(nn.Module):
 #     def __init__(self, d_model, dropout=0.5, max_len=5000):
