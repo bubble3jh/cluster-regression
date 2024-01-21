@@ -721,7 +721,7 @@ class customTransformerEncoder(TransformerEncoder):
         self.yd_emb = MLP(2,d_model//2, d_model, num_layers=pred_layers) # Linear
         self.seq_wise = seq_wise
 
-    def forward(self, src: Tensor, mask: Tensor | None = None, src_key_padding_mask: Tensor | None = None, is_causal: bool | None = None) -> Tensor:
+    def forward(self, src: Tensor, mask: Tensor | None = None, src_key_padding_mask: Tensor | None = None, is_causal: bool | None = None, val_len: Tensor | None = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -757,6 +757,7 @@ class customTransformerEncoder(TransformerEncoder):
         )
         output = src
         convert_to_nested = False
+        val_idx = val_len - 1
         first_layer = self.layers[0]
         src_key_padding_mask_for_layers = src_key_padding_mask
         why_not_sparsity_fast_path = ''
@@ -818,13 +819,19 @@ class customTransformerEncoder(TransformerEncoder):
         for idx, mod in enumerate(self.layers):
             output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
             if idx == 0:
-                output_avg = torch.mean(output, dim=1)
-                t = self.x2t(output_avg)
+                if mask is not None:
+                    output_emb = output[torch.arange(output.size(0)), val_idx] # uni dir last
+                else:
+                    output_emb = torch.mean(output, dim=1) # average
+                t = self.x2t(output_emb)
                 t_emb = self.t_emb(t)
             elif idx == 1:
                 output = output + t_emb.unsqueeze(1)
-                output_avg = torch.mean(output, dim=1)
-                yd = self.xt2yd(output_avg)
+                if mask is not None:
+                    output_emb = output[torch.arange(output.size(0)), val_idx] # uni dir last
+                else:
+                    output_emb = torch.mean(output, dim=1) # average
+                yd = self.xt2yd(output_emb)
                 yd_emb = self.yd_emb(yd)
             elif idx == 2:
                 output = output + yd_emb.unsqueeze(1)
@@ -904,7 +911,7 @@ class CETransformer(nn.Module):
         
         # Z ------
         # CETransformer encoder
-        z, enc_t, enc_yd = self.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        z, enc_t, enc_yd = self.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
         if self.unidir:
             idx = val_len - 1
             z = z[torch.arange(z.size(0)), idx] # padding 이 아닌값에 해당하는 seq중 마지막 값 사용
