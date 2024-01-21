@@ -850,6 +850,10 @@ class CETransformer(nn.Module):
         super(CETransformer, self).__init__()
         self.shift = shift
         self.unidir = unidir
+        if unidir:
+            print("unidirectional attention applied")
+        else:
+            print("maxpool applied")
         self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="none", shift= shift)
         # self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
