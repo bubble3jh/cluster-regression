@@ -200,7 +200,7 @@ if args.ignore_wandb == False:
        
 ## Load Data --------------------------------------------------------------------------------
 ### ./data/data_mod.ipynb 에서 기본적인 데이터 전처리  ###
-cutdates_num=5
+cutdates_num=0
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
 for i in range(0, cutdates_num+1):
     data = pd.read_csv(args.data_path+f"data_cut_{i}.csv")
@@ -239,6 +239,7 @@ if args.model == 'cet':
     model = models.CETransformer(d_model=args.num_features, nhead=args.num_heads, d_hid=args.hidden_dim, 
                           nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
                           unidir=args.unidir).to(args.device) # TODO: Hard coded for transformer layers
+    print("use treatment")
     args.use_treatment=True
    
 elif args.model == "mlp":
@@ -310,7 +311,7 @@ if args.eval_model != None:
 
 for epoch in range(1, args.epochs + 1):
     lr = optimizer.param_groups[0]['lr']
-    tr_epoch_eval_loss_d=0; tr_epoch_eval_loss_y=0; tr_epoch_loss_d = 0; tr_epoch_loss_y = 0; val_epoch_loss_d = 0; val_epoch_loss_y = 0; te_mae_epoch_loss_d = 0; te_mae_epoch_loss_y = 0; te_mse_epoch_loss_d = 0; te_mse_epoch_loss_y = 0
+    tr_epoch_eval_loss_d=0; tr_epoch_eval_loss_y=0; tr_epoch_eval_loss_t=0; tr_epoch_loss_d = 0; tr_epoch_loss_y = 0; val_epoch_loss_d = 0; val_epoch_loss_y = 0; val_epoch_loss_t = 0; te_mae_epoch_loss_d = 0; te_mae_epoch_loss_y = 0; te_mae_epoch_loss_t = 0; te_mse_epoch_loss_d = 0; te_mse_epoch_loss_y = 0; te_mse_epoch_loss_t = 0
 
     concat_tr_num_data = 0; concat_val_num_data = 0; concat_te_num_data = 0
 
@@ -323,13 +324,15 @@ for epoch in range(1, args.epochs + 1):
     if args.eval_model == None:
         for itr, data in enumerate(tr_dataloader):
             ## Training phase
-            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, tr_eval_loss_y, tr_eval_loss_d = utils.train(data, model, optimizer, criterion, epoch, lamb=args.lamb, eval_criterion=eval_criterion,
+            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, tr_eval_loss_y, tr_eval_loss_d, tr_eval_model, *t_loss = utils.train(data, model, optimizer, criterion, epoch, lamb=args.lamb, eval_criterion=eval_criterion,
                                                                                                                                        a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d,
                                                                                                                                        use_treatment=args.use_treatment, lambdas=args.lambdas)
             tr_epoch_loss_d += tr_batch_loss_d
             tr_epoch_loss_y += tr_batch_loss_y
             tr_epoch_eval_loss_d += tr_eval_loss_d
             tr_epoch_eval_loss_y += tr_eval_loss_y
+            if args.use_treatment:            
+                tr_epoch_eval_loss_t += t_loss[0]
             concat_tr_num_data += tr_num_data
 
             tr_pred_y_list += list(tr_predicted[:,0].cpu().detach().numpy())
@@ -342,6 +345,7 @@ for epoch in range(1, args.epochs + 1):
         tr_loss_y = tr_epoch_loss_y / concat_tr_num_data
         tr_eval_loss_d = tr_epoch_eval_loss_d / concat_tr_num_data
         tr_eval_loss_y = tr_epoch_eval_loss_y / concat_tr_num_data
+        tr_eval_loss_t = tr_epoch_eval_loss_t / concat_tr_num_data
         if args.criterion == "RMSE":
             tr_loss_d = math.sqrt(tr_loss_d)
             tr_loss_y = math.sqrt(tr_loss_y)
@@ -463,6 +467,7 @@ for epoch in range(1, args.epochs + 1):
         "train/y": tr_loss_y,
         "train_eval/d": tr_eval_loss_d,
         "train_eval/y": tr_eval_loss_y,
+        "train_eval/t": tr_eval_loss_t,
         "concat/valid_d": val_loss_d_list[0],
         "concat/valid_y": val_loss_y_list[0],
         "concat/test_total (mae)": test_mae_d_list[0] + test_mae_y_list[0],
