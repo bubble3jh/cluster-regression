@@ -859,6 +859,11 @@ class CETransformer(nn.Module):
         encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
         self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers, seq_wise=seq_wise)
         # self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
+
+        # Vairatioanl Z
+        self.fc_mu = nn.Linear(d_model, d_model)
+        self.fc_logvar = nn.Linear(d_model, d_model)
+
         decoder_layers = TransformerDecoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
         self.transformer_decoder = TransformerDecoder(decoder_layers, nlayers)
         self.max_pool = nn.MaxPool1d(kernel_size=124, stride=1)
@@ -919,6 +924,9 @@ class CETransformer(nn.Module):
         if self.unidir:
             idx = val_len - 1
             z = z[torch.arange(z.size(0)), idx] # padding 이 아닌값에 해당하는 seq중 마지막 값 사용
+            import pdb;pdb.set_trace()
+            z_mu, z_logvar = self.fc_mu(z), self.fc_logvar(z)
+            z = reparametrize(z_mu, z_logvar)
         
         # Baseline Transformer encoder
         # z = self.transformer_encoder(x, src_key_padding_mask=src_mask)
