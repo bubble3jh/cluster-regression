@@ -202,6 +202,7 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         x, x_reconstructed, enc_preds, dec_preds = out
         enc_yd_pred, enc_t_pred = enc_preds
         dec_yd_pred, dec_t_pred = dec_preds
+        
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
                                               #x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, criterion, lamdas
         loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], None, None, gt_t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas)
@@ -235,14 +236,14 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
                 loss_y = dec_loss_y
                 loss_d = dec_loss_d
                 eval_loss_t = enc_eval_loss_t
-                eval_model = "dec"
+                eval_model = "Decoder"
             else:
                 eval_loss_y, eval_loss_d = enc_eval_loss_y, enc_eval_loss_d
                 out = enc_yd_pred
                 loss_y = enc_loss_y
                 loss_d = enc_loss_d
                 eval_loss_t = dec_eval_loss_t
-                eval_model = "enc"
+                eval_model = "Encoder"
         else:
             pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
             eval_loss_y = eval_criterion(pred_y, gt_y)
@@ -270,7 +271,7 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
-        t = rest[0]
+        gt_t = rest[0]
         x, x_reconstructed, enc_preds, dec_preds = out
         enc_yd_pred, enc_t_pred = enc_preds
         dec_yd_pred, dec_t_pred = dec_preds
@@ -279,20 +280,22 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
         enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
         enc_loss_y = eval_criterion(enc_pred_y, gt_y)
         enc_loss_d = eval_criterion(enc_pred_d, gt_d)
+        enc_loss_t = eval_criterion(enc_t_pred, gt_t)
         
         # dec loss
         dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
         dec_loss_y = eval_criterion(dec_pred_y, gt_y)
         dec_loss_d = eval_criterion(dec_pred_d, gt_d)
+        dec_loss_t = eval_criterion(dec_t_pred, gt_t)
 
         if enc_loss_y + enc_loss_d > dec_loss_y + dec_loss_d:
-            loss_y, loss_d = dec_loss_y, dec_loss_d
+            loss_y, loss_d, loss_t = dec_loss_y, dec_loss_d, dec_loss_t
             out = dec_yd_pred
-            eval_model = "dec"
+            eval_model = "Decoder"
         else:
-            loss_y, loss_d = enc_loss_y, enc_loss_d
+            loss_y, loss_d, loss_t = enc_loss_y, enc_loss_d, enc_loss_t
             out = enc_yd_pred
-            eval_model = "enc"
+            eval_model = "Encoder"
     else:
         pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
         loss_y = eval_criterion(pred_y, gt_y)
@@ -301,7 +304,10 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
         
     loss = loss_y + loss_d
     if not torch.isnan(loss):
-        return loss_d.item(), loss_y.item(), batch_num, out, y
+        if use_treatment:
+            return loss_d.item(), loss_y.item(), batch_num, out, y, eval_model, loss_t
+        else:
+            return loss_d.item(), loss_y.item(), batch_num, out, y, eval_model
     else:
         return 0, batch_num, out, y
 
@@ -316,37 +322,57 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
 
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+
     if use_treatment:
-        t = rest[0]
-        # x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
+        gt_t = rest[0]
         x, x_reconstructed, enc_preds, dec_preds = out
         enc_yd_pred, enc_t_pred = enc_preds
         dec_yd_pred, dec_t_pred = dec_preds
-        # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1], criterion, aux_criterion)
-        # (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
-        if False: # TODO: hardcode
-            # loss_y = enc_loss_y
-            # loss_d = enc_loss_d
-            out = enc_yd_pred
-            # out = dec_yd_pred
-        else:
-            # loss_y = dec_loss_y
-            # loss_d = dec_loss_d
+        
+        # enc loss
+        enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
+        enc_loss_y = criterion_mae(enc_pred_y, gt_y)
+        enc_loss_d = criterion_mae(enc_pred_d, gt_d)
+        enc_loss_t = criterion_mae(enc_t_pred, gt_t)
+        
+        # dec loss
+        dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
+        dec_loss_y = criterion_mae(dec_pred_y, gt_y)
+        dec_loss_d = criterion_mae(dec_pred_d, gt_d)
+        dec_loss_t = criterion_mae(dec_t_pred, gt_t)
+
+        if enc_loss_y + enc_loss_d > dec_loss_y + dec_loss_d:
+            mae_y, mae_d, loss_t = dec_loss_y, dec_loss_d, dec_loss_t
+            rmse_y, rmse_d = criterion_rmse(dec_pred_y, gt_y), criterion_rmse(dec_pred_d, gt_d)
             out = dec_yd_pred
-    if out.shape == torch.Size([2]):
-        out = out.unsqueeze(0)
-    pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
-    # MAE
-    mae_y = criterion_mae(pred_y, gt_y)
-    mae_d = criterion_mae(pred_d, gt_d)
-    mae = mae_y + mae_d
-    # RMSE
-    rmse_y = criterion_rmse(pred_y, gt_y)
-    rmse_d = criterion_rmse(pred_d, gt_d)
-    rmse = rmse_y + rmse_d
+            eval_model = "Decoder"
+        else:
+            mae_y, mae_d, loss_t = enc_loss_y, enc_loss_d, enc_loss_t
+            rmse_y, rmse_d = criterion_rmse(enc_pred_y, gt_y), criterion_rmse(enc_pred_d, gt_d)
+            out = enc_yd_pred
+            eval_model = "Encoder"
+        mae = mae_y + mae_d
+        rmse = rmse_y + rmse_d
+    else:
+        if out.shape == torch.Size([2]):
+            out = out.unsqueeze(0)
+        pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
+        # MAE
+        mae_y = criterion_mae(pred_y, gt_y)
+        mae_d = criterion_mae(pred_d, gt_d)
+        mae = mae_y + mae_d
+        
+        # RMSE
+        rmse_y = criterion_rmse(pred_y, gt_y)
+        rmse_d = criterion_rmse(pred_d, gt_d)
+        rmse = rmse_y + rmse_d
+        eval_model = "nan"
     
     if not torch.isnan(mae) and not torch.isnan(rmse):
-        return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), batch_num, out, y
+        if use_treatment:
+            return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), batch_num, out, y, loss_t
+        else:
+            return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), batch_num, out, y
     else:
         return 0, batch_num, out, y
     
