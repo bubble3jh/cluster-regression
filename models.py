@@ -924,7 +924,6 @@ class CETransformer(nn.Module):
         if self.unidir:
             idx = val_len - 1
             z = z[torch.arange(z.size(0)), idx] # padding 이 아닌값에 해당하는 seq중 마지막 값 사용
-            import pdb;pdb.set_trace()
             z_mu, z_logvar = self.fc_mu(z), self.fc_logvar(z)
             z = reparametrize(z_mu, z_logvar)
         
