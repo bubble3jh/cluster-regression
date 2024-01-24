@@ -81,7 +81,7 @@ parser.add_argument('--shift', action='store_true')
 
 parser.add_argument(
     "--MC_sample",
-    type=int, default=1,
+    type=int, default=30,
     help="Counts of Monte Carlo resampling"
 )
 
@@ -265,7 +265,7 @@ elif args.model in ["svr", "rfr"]:
     args.device = torch.device("cpu")
     ml_algorithm.fit(args.data_path, args.model, args.ignore_wandb, cutdates_num, args.table_idx)
 
-print(f"Successfully prepare {args.model} model")
+print(f"Successfully prepared {args.model} model")
 # ---------------------------------------------------------------------------------------------
 
 
@@ -398,7 +398,7 @@ for epoch in range(1, args.epochs + 1):
         for itr, data in enumerate(test_dataloaders[i]):
             te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth, *t_loss = utils.test(data, model,
                                                                                 args.scaling, test_datasets[i].dataset.a_y, test_datasets[i].dataset.b_y,
-                                                                                test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d, use_treatment=args.use_treatment)
+                                                                                test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d, use_treatment=args.use_treatment, MC_sample=args.MC_sample)
             te_mae_epoch_loss_d += te_mae_batch_loss_d
             te_mae_epoch_loss_y += te_mae_batch_loss_y
             if args.use_treatment:

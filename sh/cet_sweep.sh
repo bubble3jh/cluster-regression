@@ -3,7 +3,7 @@ IDX=0
 ## Coarse Search
 ## Cos Anneal
 ## unidirection best 0.001, 0.01 256 128 1 2
-run_group="variational_cet_unidir_model_sweep"
+run_group="variational_cet_unidir_mc_sample"
 for lr_init in 1e-3 5e-4 1e-2
 do
 for wd in 1e-2 1e-3 1e-4 
@@ -39,7 +39,9 @@ CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --num_heads=${num_heads} \
 --lambdas $lambda1 $lambda2 $lambda3 \
 --run_group=${run_group} \
---unidir &
+--MC_sample=30 \
+--unidir \
+--ignore_wandb
 
 # GPU ID를 다음 것으로 변경
 IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
