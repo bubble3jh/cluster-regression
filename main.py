@@ -79,6 +79,12 @@ parser.add_argument(
 
 parser.add_argument('--shift', action='store_true')
 
+parser.add_argument(
+    "--MC_sample",
+    type=int, default=1,
+    help="Counts of Monte Carlo resampling"
+)
+
 #----------------------------------------------------------------
 
 
@@ -347,6 +353,7 @@ for epoch in range(1, args.epochs + 1):
         tr_eval_loss_d = tr_epoch_eval_loss_d / concat_tr_num_data
         tr_eval_loss_y = tr_epoch_eval_loss_y / concat_tr_num_data
         tr_eval_loss_t = tr_epoch_eval_loss_t / concat_tr_num_data
+        
         if args.criterion == "RMSE":
             tr_loss_d = math.sqrt(tr_loss_d)
             tr_loss_y = math.sqrt(tr_loss_y)
@@ -361,7 +368,7 @@ for epoch in range(1, args.epochs + 1):
             
             val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth, eval_model, *t_loss = utils.valid(data, model, eval_criterion,
                                                                                 args.scaling, val_datasets[i].dataset.a_y, val_datasets[i].dataset.b_y,
-                                                                                val_datasets[i].dataset.a_d, val_datasets[i].dataset.b_d, use_treatment=args.use_treatment)
+                                                                                val_datasets[i].dataset.a_d, val_datasets[i].dataset.b_d, use_treatment=args.use_treatment, MC_sample=args.MC_sample)
             val_epoch_loss_d += val_batch_loss_d
             val_epoch_loss_y += val_batch_loss_y
             if args.use_treatment:            

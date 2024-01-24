@@ -210,7 +210,7 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         
         # (warmup_loss_y, warmup_loss_d), (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
         (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (enc_loss_t, dec_loss_t) = ind_losses
-
+        
     else:
         loss_d = criterion(out[:,0], y[:,0])
         loss_y = criterion(out[:,1], y[:,1])    
@@ -222,14 +222,13 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
             enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
             enc_eval_loss_y = eval_criterion(enc_pred_y, gt_y)
             enc_eval_loss_d = eval_criterion(enc_pred_d, gt_d)
-            enc_eval_loss_t = eval_criterion(enc_t_pred, gt_t)
+            enc_eval_loss_t = eval_criterion(enc_t_pred.squeeze(), gt_t)
             
             # dec loss
             dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
             dec_eval_loss_y = eval_criterion(dec_pred_y, gt_y)
             dec_eval_loss_d = eval_criterion(dec_pred_d, gt_d)
-            dec_eval_loss_t = eval_criterion(dec_t_pred, gt_t)
-
+            dec_eval_loss_t = eval_criterion(dec_t_pred.squeeze(), gt_t)
             if enc_eval_loss_y + enc_eval_loss_d > dec_eval_loss_y + dec_eval_loss_d:
                 eval_loss_y, eval_loss_d = dec_eval_loss_y, dec_eval_loss_d
                 out = dec_yd_pred
@@ -265,28 +264,37 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
 
 ## Validation --------------------------------------------------------------------------------
 @torch.no_grad()
-def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
+def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sample=1):
     model.eval()
     
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
-    out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    accumulated_outputs = [0] * 6  # (x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred)
+
     if use_treatment:
         gt_t = rest[0]
-        x, x_reconstructed, enc_preds, dec_preds = out
-        enc_yd_pred, enc_t_pred = enc_preds
-        dec_yd_pred, dec_t_pred = dec_preds
+        for i in range(MC_sample):
+            out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+            x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
+            
+            # accumulate predictions
+            outputs = [x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred]
+            accumulated_outputs = [accumulated + output for accumulated, output in zip(accumulated_outputs, outputs)]
+        
+        # calculate average
+        avg_outputs = [accumulated / MC_sample for accumulated in accumulated_outputs]
+        x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred = avg_outputs
         
         # enc loss
         enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
         enc_loss_y = eval_criterion(enc_pred_y, gt_y)
         enc_loss_d = eval_criterion(enc_pred_d, gt_d)
-        enc_loss_t = eval_criterion(enc_t_pred, gt_t)
+        enc_loss_t = eval_criterion(enc_t_pred.squeeze(), gt_t)
         
         # dec loss
         dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
         dec_loss_y = eval_criterion(dec_pred_y, gt_y)
         dec_loss_d = eval_criterion(dec_pred_d, gt_d)
-        dec_loss_t = eval_criterion(dec_t_pred, gt_t)
+        dec_loss_t = eval_criterion(dec_t_pred.squeeze(), gt_t)
 
         if enc_loss_y + enc_loss_d > dec_loss_y + dec_loss_d:
             loss_y, loss_d, loss_t = dec_loss_y, dec_loss_d, dec_loss_t
@@ -297,6 +305,7 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
             out = enc_yd_pred
             eval_model = "Encoder"
     else:
+        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
         pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
         loss_y = eval_criterion(pred_y, gt_y)
         loss_d = eval_criterion(pred_d, gt_d)
@@ -313,7 +322,7 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
 
 ## Test ----------------------------------------------------------------------------------------
 @torch.no_grad()
-def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
+def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sample=1):
     
     criterion_mae = nn.L1Loss(reduction="sum")
     criterion_rmse = nn.MSELoss(reduction="sum")
@@ -323,23 +332,33 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
 
+    accumulated_outputs = [0] * 6  # (x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred)
+
     if use_treatment:
         gt_t = rest[0]
-        x, x_reconstructed, enc_preds, dec_preds = out
-        enc_yd_pred, enc_t_pred = enc_preds
-        dec_yd_pred, dec_t_pred = dec_preds
+        for i in range(MC_sample):
+            out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+            x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
+            
+            # accumulate predictions
+            outputs = [x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred]
+            accumulated_outputs = [accumulated + output for accumulated, output in zip(accumulated_outputs, outputs)]
+        
+        # calculate average
+        avg_outputs = [accumulated / MC_sample for accumulated in accumulated_outputs]
+        x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred = avg_outputs
         
         # enc loss
         enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
         enc_loss_y = criterion_mae(enc_pred_y, gt_y)
         enc_loss_d = criterion_mae(enc_pred_d, gt_d)
-        enc_loss_t = criterion_mae(enc_t_pred, gt_t)
+        enc_loss_t = criterion_mae(enc_t_pred.squeeze(), gt_t)
         
         # dec loss
         dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
         dec_loss_y = criterion_mae(dec_pred_y, gt_y)
         dec_loss_d = criterion_mae(dec_pred_d, gt_d)
-        dec_loss_t = criterion_mae(dec_t_pred, gt_t)
+        dec_loss_t = criterion_mae(dec_t_pred.squeeze(), gt_t)
 
         if enc_loss_y + enc_loss_d > dec_loss_y + dec_loss_d:
             mae_y, mae_d, loss_t = dec_loss_y, dec_loss_d, dec_loss_t
@@ -354,6 +373,7 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False):
         mae = mae_y + mae_d
         rmse = rmse_y + rmse_d
     else:
+        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
         if out.shape == torch.Size([2]):
             out = out.unsqueeze(0)
         pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
