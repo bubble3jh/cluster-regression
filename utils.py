@@ -271,8 +271,8 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
     if use_treatment:
         gt_t = rest[0]
         out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days, is_MAP=True)
-        x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
-        
+        x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
+
         # for i in range(MC_sample):
         #     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
         #     x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
@@ -339,7 +339,7 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sampl
         gt_t = rest[0]
         for i in range(MC_sample):
             out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-            x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
+            x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
             
             # accumulate predictions
             outputs = [x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred]

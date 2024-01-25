@@ -3,7 +3,7 @@ IDX=0
 ## Coarse Search
 ## Cos Anneal
 ## unidirection best 0.001, 0.01 256 128 1 2
-run_group="variational_cet_unidir_mc_sample"
+run_group="variational_cet_unidir_mc_sample_for_test"
 for lr_init in 1e-3 5e-4 1e-2
 do
 for wd in 1e-2 1e-3 1e-4 
@@ -24,7 +24,7 @@ for lambda1 in 1
 do
 for lambda2 in 1
 do
-for lambda3 in 0 #0 0.1 1 10
+for lambda3 in 1 #0 0.1 1 10
 do
 CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --hidden_dim=${hidden_dim} \
