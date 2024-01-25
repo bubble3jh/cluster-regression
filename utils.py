@@ -270,17 +270,20 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
 
     if use_treatment:
         gt_t = rest[0]
-        for i in range(MC_sample):
-            out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-            x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
-            
-            # accumulate predictions
-            outputs = [x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred]
-            accumulated_outputs = [accumulated + output for accumulated, output in zip(accumulated_outputs, outputs)]
+        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days, is_MAP=True)
+        x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
         
-        # calculate average
-        avg_outputs = [accumulated / MC_sample for accumulated in accumulated_outputs]
-        x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred = avg_outputs
+        # for i in range(MC_sample):
+        #     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+        #     x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred) = out
+            
+        #     # accumulate predictions
+        #     outputs = [x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred]
+        #     accumulated_outputs = [accumulated + output for accumulated, output in zip(accumulated_outputs, outputs)]
+        
+        # # calculate average
+        # avg_outputs = [accumulated / MC_sample for accumulated in accumulated_outputs]
+        # x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred = avg_outputs
         
         # enc loss
         enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
