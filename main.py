@@ -177,7 +177,7 @@ parser.add_argument("--scheduler", type=str, default='cos_anneal', choices=['con
 parser.add_argument("--t_max", type=int, default=200,
                 help="T_max for Cosine Annealing Learning Rate Scheduler (Default : 200)")
 
-parser.add_argument("--lambdas", nargs='+', type=float, default=[1.0, 1.0, 1.0], help='encoder loss + decoder loss + reconstruction loss')
+parser.add_argument("--lambdas", nargs='+', type=float, default=[1.0, 1.0, 1.0], help='pred loss + kld loss + recon loss')
 #----------------------------------------------------------------
 
 parser.add_argument("--lamb", type=float, default=0.0,

@@ -40,8 +40,7 @@ CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --lambdas $lambda1 $lambda2 $lambda3 \
 --run_group=${run_group} \
 --MC_sample=30 \
---unidir \
---ignore_wandb
+--unidir &
 
 # GPU ID를 다음 것으로 변경
 IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))

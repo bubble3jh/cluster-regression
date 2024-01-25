@@ -952,7 +952,7 @@ class CETransformer(nn.Module):
         #     tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
         # x_recon = self.transformer_decoder(tgt = x_in, memory = z, tgt_mask = tgt_mask, memory_mask = None, tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=src_mask)
         # return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t)
-        return x, torch.zeros([dec_yd.size(0),124, 128]), (enc_yd, enc_t), (dec_yd, dec_t)
+        return x, torch.zeros([dec_yd.size(0),124, 128]), (enc_yd, enc_t), (dec_yd, dec_t), (z_mu, z_logvar)
 
 # class PositionalEncoding(nn.Module):
 #     def __init__(self, d_model, dropout=0.5, max_len=5000):
