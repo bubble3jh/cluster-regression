@@ -906,7 +906,7 @@ class CETransformer(nn.Module):
                     if layer.bias is not None:
                         layer.bias.data.zero_()
 
-    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days):
+    def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days, is_MAP=False):
         # Encoder
         if self.embedding.reduction != "none":
             x = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
@@ -925,7 +925,10 @@ class CETransformer(nn.Module):
             idx = val_len - 1
             z = z[torch.arange(z.size(0)), idx] # padding 이 아닌값에 해당하는 seq중 마지막 값 사용
             z_mu, z_logvar = self.fc_mu(z), self.fc_logvar(z)
-            z = reparametrize(z_mu, z_logvar)
+            if is_MAP:
+                z=z_mu
+            else:
+                z = reparametrize(z_mu, z_logvar)
         
         # Baseline Transformer encoder
         # z = self.transformer_encoder(x, src_key_padding_mask=src_mask)
