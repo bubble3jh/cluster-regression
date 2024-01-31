@@ -924,26 +924,26 @@ class CETransformer(nn.Module):
         if self.unidir:
             idx = val_len - 1
             z = z[torch.arange(z.size(0)), idx] # padding 이 아닌값에 해당하는 seq중 마지막 값 사용
-            z_mu, z_logvar = self.fc_mu(z), self.fc_logvar(z)
-            if is_MAP:
-                z=z_mu
-            else:
-                z = reparametrize(z_mu, z_logvar)
+        else:
+            val_mask = torch.arange(z.size(1))[None, :].cuda() < val_len[:, None]
+            valid_z = z * val_mask[:, :, None].float().cuda()
+            z = valid_z.max(dim=1)[0] # padding 이 아닌값에 해당하는 seq 들 max pool
+        
+        z_mu, z_logvar = self.fc_mu(z), self.fc_logvar(z)
+        
+        if is_MAP:
+            z=z_mu
+        else:
+            z = reparametrize(z_mu, z_logvar)
         
         # Baseline Transformer encoder
         # z = self.transformer_encoder(x, src_key_padding_mask=src_mask)
         
-        # z_avg = torch.mean(z, dim=1)                   # Z Mean
-        if self.unidir:
-            z_avg = z                                      # Z uni-directional
-        else:
-            z_avg = self.max_pool(z.transpose(1, 2))         # Z Maxpool
-        
-        dec_t = self.z2t(z_avg.squeeze())
+        dec_t = self.z2t(z.squeeze())
         t_emb = self.t_emb(dec_t)
         
         # Linear Decoder
-        dec_yd = self.zt2yd(z_avg.squeeze() + t_emb)
+        dec_yd = self.zt2yd(z.squeeze() + t_emb)
         
         # Transformer Decoder
         # if self.shift:
