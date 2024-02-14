@@ -846,10 +846,16 @@ class customTransformerEncoder(TransformerEncoder):
 
 
 class CETransformer(nn.Module):
-    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False):
+    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False, is_variational=False):
         super(CETransformer, self).__init__()
         self.shift = shift
         self.unidir = unidir
+        self.is_variational = is_variational
+        if is_variational:
+            print("variational z sampling")
+        else:
+            print("determinant z ")
+            
         if unidir:
             print("unidirectional attention applied")
         else:
@@ -874,7 +880,7 @@ class CETransformer(nn.Module):
         self.t_emb = MLP(1, d_model//2, d_model, num_layers=pred_layers) # Linear
         self.zt2yd = MLP(d_model, d_model//2, 2, num_layers=pred_layers) # Linear
 
-        # self.init_weights()
+        # self.init_weights(1)
 
     # def generate_square_subsequent_mask(self, sz):
     #     mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
@@ -886,7 +892,7 @@ class CETransformer(nn.Module):
         mask = mask.masked_fill(mask == 0, True).masked_fill(mask == 1, False)
         return mask
 
-    def init_weights(self):
+    def init_weights(self, c):
         initrange = 0.1
         # For embedding layers
         if hasattr(self.embedding, 'weight'):
@@ -905,6 +911,22 @@ class CETransformer(nn.Module):
                     layer.weight.data.uniform_(-initrange, initrange)
                     if layer.bias is not None:
                         layer.bias.data.zero_()
+        
+        # For variational layers
+        # for fc in [self.fc_mu]:
+        #     for layer in fc.layers:
+        #         if isinstance(layer, nn.Linear):
+        #             layer.weight.data.zero_() 
+        #             if layer.bias is not None:
+        #                 layer.bias.data.zero_()
+
+        # # For variational layers
+        # for fc in [self.fc_logvar]:
+        #     for layer in fc.layers:
+        #         if isinstance(layer, nn.Linear):
+        #             layer.weight.data = (torch.log(c) * torch.ones_like(layer.weight.data)).requires_grad_(True)
+        #             if layer.bias is not None:
+        #                 layer.bias.data.zero_()
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, val_len, diff_days, is_MAP=False):
         # Encoder
@@ -929,13 +951,16 @@ class CETransformer(nn.Module):
             valid_z = z * val_mask[:, :, None].float().cuda()
             z = valid_z.max(dim=1)[0] # padding 이 아닌값에 해당하는 seq 들 max pool
         
-        z_mu, z_logvar = self.fc_mu(z), self.fc_logvar(z)
-        
+        # z_mu, z_logvar = self.fc_mu(z), self.fc_logvar(z)
+        z_mu, z_logvar = z, self.fc_logvar(z)
+            
         if is_MAP:
             z=z_mu
-        else:
+        elif self.is_variational:
             z = reparametrize(z_mu, z_logvar)
-        
+        else:
+            z_logvar = torch.full_like(z_mu, -100.0).cuda()
+            z = reparametrize(z_mu, z_logvar)
         # Baseline Transformer encoder
         # z = self.transformer_encoder(x, src_key_padding_mask=src_mask)
         
@@ -955,8 +980,9 @@ class CETransformer(nn.Module):
         #     tgt_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
         # x_recon = self.transformer_decoder(tgt = x_in, memory = z, tgt_mask = tgt_mask, memory_mask = None, tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=src_mask)
         # return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t)
+        
         return x, torch.zeros([dec_yd.size(0),124, 128]), (enc_yd, enc_t), (dec_yd, dec_t), (z_mu, z_logvar)
-
+    
 # class PositionalEncoding(nn.Module):
 #     def __init__(self, d_model, dropout=0.5, max_len=5000):
 #         super(PositionalEncoding, self).__init__()

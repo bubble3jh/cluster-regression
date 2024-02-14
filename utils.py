@@ -800,7 +800,7 @@ def cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, d
     pred_loss = enc_loss + dec_loss
     
     # KLD loss
-    kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
+    # kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
 
     # Reconstruction Loss
     #recon_loss = criterion(x_reconstructed, x)
@@ -820,5 +820,5 @@ def cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, d
     # # Reconstruction Loss
     # recon_loss = nan_filtered_loss(x_reconstructed, x, criterion)
 
-    total_loss = lambdas[0]*pred_loss + lambdas[1]*kl_loss #+ lambdas[2]*recon_loss
+    total_loss = lambdas[0]*pred_loss #+ lambdas[1]*kl_loss #+ lambdas[2]*recon_loss
     return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss), (enc_t_loss, dec_t_loss)

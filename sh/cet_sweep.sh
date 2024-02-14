@@ -3,28 +3,30 @@ IDX=0
 ## Coarse Search
 ## Cos Anneal
 ## unidirection best 0.001, 0.01 256 128 1 2
-run_group="variational_cet_map-mc_maxpool"
-for lr_init in 1e-3 5e-4 #1e-2
+run_group="large_cet_maxpoolandunidir_small_var_nomeanlayer"
+for lr_init in 1e-3 5e-4 1e-2
 do
-for wd in 1e-2 1e-3 #1e-4 
+for wd in 1e-2 1e-3 1e-4 
 do
 for drop_out in 0.0 0.3 # 0.5
 do
-for hidden_dim in 512 1024 # 128 256 512
+for hidden_dim in 1024 256 512
 do
-for num_features in 128
+for num_features in 256 512 1024 #128 256 512
 do
 for num_layers in 1 3 #4 5
 do
-for num_heads in 4 8 #2 4 6
+for num_heads in 2 8
 do
 for optim in "adam"
 do
-for lambda1 in 1 #10
+for lambda1 in 1 #0.5 1 2 
 do
-for lambda2 in 1 #10
+for lambda2 in 1 #0.5 1 2 
 do
 for lambda3 in 0 #0.1 1 10
+do
+for unidir in "" "--unidir" #""
 do
 CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --hidden_dim=${hidden_dim} \
@@ -36,11 +38,12 @@ CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --t_max=300 \
 --drop_out=${drop_out} \
 --num_layers=${num_layers} \
+--num_features=${num_features} \
 --num_heads=${num_heads} \
 --lambdas $lambda1 $lambda2 $lambda3 \
 --run_group=${run_group} \
---MC_sample=30 \
---unidir &
+${unidir} \
+--MC_sample=1 &
 
 # GPU ID를 다음 것으로 변경
 IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
@@ -50,6 +53,7 @@ if [ $IDX -eq 0 ]; then
 wait
 fi
 
+done
 done
 done
 done

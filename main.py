@@ -142,6 +142,9 @@ parser.add_argument("--disable_embedding", action='store_true',
 parser.add_argument("--unidir", action='store_true',
         help = "Unidirectional attention to transformer encoder (Default : False)")
 
+parser.add_argument("--variational", action='store_true',
+        help = "variational z sampling (Default : False)")
+
 #----------------------------------------------------------------
 
 # Criterion -----------------------------------------------------
@@ -244,7 +247,7 @@ if args.model == 'transformer':
 if args.model == 'cet':
     model = models.CETransformer(d_model=args.num_features, nhead=args.num_heads, d_hid=args.hidden_dim, 
                           nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
-                          unidir=args.unidir).to(args.device) # TODO: Hard coded for transformer layers
+                          unidir=args.unidir, is_variational=args.variational).to(args.device) # TODO: Hard coded for transformer layers
     print("use treatment")
     args.use_treatment=True
    
@@ -445,11 +448,11 @@ for epoch in range(1, args.epochs + 1):
             
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
-            utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-date{i}_best_val.pt",
-                                epoch = epoch,
-                                state_dict = model.state_dict(),
-                                optimizer = optimizer.state_dict(),
-                                )
+            # utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-date{i}_best_val.pt",
+            #                     epoch = epoch,
+            #                     state_dict = model.state_dict(),
+            #                     optimizer = optimizer.state_dict(),
+            #                     )
             if args.save_pred:
                 # save prediction and ground truth as csv
                 val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
