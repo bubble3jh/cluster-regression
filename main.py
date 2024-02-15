@@ -249,7 +249,7 @@ if args.model == 'cet':
                           nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
                           unidir=args.unidir, is_variational=args.variational).to(args.device) # TODO: Hard coded for transformer layers
     print("use treatment")
-    args.use_treatment=True
+    # args.use_treatment=True
    
 elif args.model == "mlp":
     model = models.MLPRegressor(input_size=args.num_features,
@@ -334,7 +334,7 @@ for epoch in range(1, args.epochs + 1):
     if args.eval_model == None:
         for itr, data in enumerate(tr_dataloader):
             ## Training phase
-            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, tr_eval_loss_y, tr_eval_loss_d, tr_eval_model, *t_loss = utils.train(data, model, optimizer, criterion, epoch, lamb=args.lamb, eval_criterion=eval_criterion,
+            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, tr_eval_loss_y, tr_eval_loss_d, tr_eval_model, *t_loss = utils.train(args, data, model, optimizer, criterion, epoch, lamb=args.lamb, eval_criterion=eval_criterion,
                                                                                                                                        a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d,
                                                                                                                                        use_treatment=args.use_treatment, lambdas=args.lambdas)
             tr_epoch_loss_d += tr_batch_loss_d
@@ -369,7 +369,7 @@ for epoch in range(1, args.epochs + 1):
         ## Validation Phase ----------------------------------------------------------------------
         for itr, data in enumerate(val_dataloaders[i]):
             
-            val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth, eval_model, *t_loss = utils.valid(data, model, eval_criterion,
+            val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth, eval_model, *t_loss = utils.valid(args, data, model, eval_criterion,
                                                                                 args.scaling, val_datasets[i].dataset.a_y, val_datasets[i].dataset.b_y,
                                                                                 val_datasets[i].dataset.a_d, val_datasets[i].dataset.b_d, use_treatment=args.use_treatment, MC_sample=args.MC_sample)
             val_epoch_loss_d += val_batch_loss_d
@@ -399,7 +399,7 @@ for epoch in range(1, args.epochs + 1):
 
         ## Test Phase ----------------------------------------------------------------------
         for itr, data in enumerate(test_dataloaders[i]):
-            te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth, *t_loss = utils.test(data, model,
+            te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth, *t_loss = utils.test(args, data, model,
                                                                                 args.scaling, test_datasets[i].dataset.a_y, test_datasets[i].dataset.b_y,
                                                                                 test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d, use_treatment=args.use_treatment, MC_sample=args.MC_sample)
             te_mae_epoch_loss_d += te_mae_batch_loss_d

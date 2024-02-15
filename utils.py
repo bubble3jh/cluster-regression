@@ -190,7 +190,7 @@ class RMSELoss(nn.Module):
 
 
 ## Train --------------------------------------------------------------------------------------
-def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux_criterion=None, use_treatment=False, eval_criterion = None, scaling="minmax",a_y=None, b_y=None, a_d=None, b_d=None, pred_model="enc", binary_t=False, lambdas=[1,1,1]):
+def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux_criterion=None, use_treatment=False, eval_criterion = None, scaling="minmax",a_y=None, b_y=None, a_d=None, b_d=None, pred_model="enc", binary_t=False, lambdas=[1,1,1]):
     eval_loss_y = None; eval_loss_d=None
     model.train()
     optimizer.zero_grad()
@@ -210,9 +210,17 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
         (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (enc_loss_t, dec_loss_t) = ind_losses
         
     else:
-        loss_d = criterion(out[:,0], y[:,0])
-        loss_y = criterion(out[:,1], y[:,1])    
-        loss = loss_d + loss_y
+        if args.model == 'cet':
+            gt_t = t[0]
+            # x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
+            x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
+            
+            loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t, y[:,0] , y[:,1], criterion, lambdas, False)
+            (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (_, _) = ind_losses
+        else:
+            loss_d = criterion(out[:,0], y[:,0])
+            loss_y = criterion(out[:,1], y[:,1])    
+            loss = loss_d + loss_y
 
     if eval_criterion != None:
         if use_treatment:
@@ -242,10 +250,37 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
                 eval_loss_t = dec_eval_loss_t
                 eval_model = "Encoder"
         else:
-            pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
-            eval_loss_y = eval_criterion(pred_y, gt_y)
-            eval_loss_d = eval_criterion(pred_d, gt_d)
-            eval_model = "nan"
+            if args.model == 'cet':
+                # enc loss
+                enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
+                enc_eval_loss_y = eval_criterion(enc_pred_y, gt_y)
+                enc_eval_loss_d = eval_criterion(enc_pred_d, gt_d)
+                enc_eval_loss_t = None
+                
+                # dec loss
+                dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
+                dec_eval_loss_y = eval_criterion(dec_pred_y, gt_y)
+                dec_eval_loss_d = eval_criterion(dec_pred_d, gt_d)
+                dec_eval_loss_t = None
+                if enc_eval_loss_y + enc_eval_loss_d > dec_eval_loss_y + dec_eval_loss_d:
+                    eval_loss_y, eval_loss_d = dec_eval_loss_y, dec_eval_loss_d
+                    out = dec_yd_pred
+                    loss_y = dec_loss_y
+                    loss_d = dec_loss_d
+                    eval_loss_t = enc_eval_loss_t
+                    eval_model = "Decoder"
+                else:
+                    eval_loss_y, eval_loss_d = enc_eval_loss_y, enc_eval_loss_d
+                    out = enc_yd_pred
+                    loss_y = enc_loss_y
+                    loss_d = enc_loss_d
+                    eval_loss_t = dec_eval_loss_t
+                    eval_model = "Encoder"
+            else:
+                pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
+                eval_loss_y = eval_criterion(pred_y, gt_y)
+                eval_loss_d = eval_criterion(pred_d, gt_d)
+                eval_model = "nan"
     # Add Penalty term for ridge regression
     if lamb != 0.0:
         loss += lamb * torch.norm(model.linear1.weight, p=2)
@@ -262,7 +297,7 @@ def train(data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.0, aux
 
 ## Validation --------------------------------------------------------------------------------
 @torch.no_grad()
-def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sample=1):
+def valid(args, data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sample=1):
     model.eval()
     
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
@@ -306,11 +341,36 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
             out = enc_yd_pred
             eval_model = "Encoder"
     else:
-        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-        pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
-        loss_y = eval_criterion(pred_y, gt_y)
-        loss_d = eval_criterion(pred_d, gt_d)
-        eval_model = "nan"
+        if args.model == 'cet':
+            out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days, is_MAP=True)
+            x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out   
+             
+            # enc loss
+            enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
+            enc_loss_y = eval_criterion(enc_pred_y, gt_y)
+            enc_loss_d = eval_criterion(enc_pred_d, gt_d)
+            enc_loss_t = None
+            
+            # dec loss
+            dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
+            dec_loss_y = eval_criterion(dec_pred_y, gt_y)
+            dec_loss_d = eval_criterion(dec_pred_d, gt_d)
+            dec_loss_t = None
+
+            if enc_loss_y + enc_loss_d > dec_loss_y + dec_loss_d:
+                loss_y, loss_d, loss_t = dec_loss_y, dec_loss_d, dec_loss_t
+                out = dec_yd_pred
+                eval_model = "Decoder"
+            else:
+                loss_y, loss_d, loss_t = enc_loss_y, enc_loss_d, enc_loss_t
+                out = enc_yd_pred
+                eval_model = "Encoder"
+        else:
+            out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+            pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
+            loss_y = eval_criterion(pred_y, gt_y)
+            loss_d = eval_criterion(pred_d, gt_d)
+            eval_model = "nan"
         
     loss = loss_y + loss_d
     if not torch.isnan(loss):
@@ -323,7 +383,7 @@ def valid(data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatmen
 
 ## Test ----------------------------------------------------------------------------------------
 @torch.no_grad()
-def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sample=1):
+def test(args, data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sample=1):
     
     criterion_mae = nn.L1Loss(reduction="sum")
     criterion_rmse = nn.MSELoss(reduction="sum")
@@ -374,20 +434,60 @@ def test(data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sampl
         mae = mae_y + mae_d
         rmse = rmse_y + rmse_d
     else:
-        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-        if out.shape == torch.Size([2]):
-            out = out.unsqueeze(0)
-        pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
-        # MAE
-        mae_y = criterion_mae(pred_y, gt_y)
-        mae_d = criterion_mae(pred_d, gt_d)
-        mae = mae_y + mae_d
+        if args.model == 'cet':
+            gt_t = rest[0]
+            for i in range(MC_sample):
+                out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+                x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
+                
+                # accumulate predictions
+                outputs = [x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred]
+                accumulated_outputs = [accumulated + output for accumulated, output in zip(accumulated_outputs, outputs)]
+            
+            # calculate average
+            avg_outputs = [accumulated / MC_sample for accumulated in accumulated_outputs]
+            x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred = avg_outputs
+            
+            # enc loss
+            enc_pred_y, enc_pred_d, gt_y, gt_d = reverse_scaling(scaling, enc_yd_pred, y, a_y, b_y, a_d, b_d)
+            enc_loss_y = criterion_mae(enc_pred_y, gt_y)
+            enc_loss_d = criterion_mae(enc_pred_d, gt_d)
+            enc_loss_t = None
+            
+            # dec loss
+            dec_pred_y, dec_pred_d, gt_y, gt_d = reverse_scaling(scaling, dec_yd_pred, y, a_y, b_y, a_d, b_d)
+            dec_loss_y = criterion_mae(dec_pred_y, gt_y)
+            dec_loss_d = criterion_mae(dec_pred_d, gt_d)
+            dec_loss_t = None
+
+            if enc_loss_y + enc_loss_d > dec_loss_y + dec_loss_d:
+                mae_y, mae_d, loss_t = dec_loss_y, dec_loss_d, dec_loss_t
+                rmse_y, rmse_d = criterion_rmse(dec_pred_y, gt_y), criterion_rmse(dec_pred_d, gt_d)
+                out = dec_yd_pred
+                eval_model = "Decoder"
+            else:
+                mae_y, mae_d, loss_t = enc_loss_y, enc_loss_d, enc_loss_t
+                rmse_y, rmse_d = criterion_rmse(enc_pred_y, gt_y), criterion_rmse(enc_pred_d, gt_d)
+                out = enc_yd_pred
+                eval_model = "Encoder"
+            mae = mae_y + mae_d
+            rmse = rmse_y + rmse_d
         
-        # RMSE
-        rmse_y = criterion_rmse(pred_y, gt_y)
-        rmse_d = criterion_rmse(pred_d, gt_d)
-        rmse = rmse_y + rmse_d
-        eval_model = "nan"
+        else:
+            out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+            if out.shape == torch.Size([2]):
+                out = out.unsqueeze(0)
+            pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d)
+            # MAE
+            mae_y = criterion_mae(pred_y, gt_y)
+            mae_d = criterion_mae(pred_d, gt_d)
+            mae = mae_y + mae_d
+            
+            # RMSE
+            rmse_y = criterion_rmse(pred_y, gt_y)
+            rmse_d = criterion_rmse(pred_d, gt_d)
+            rmse = rmse_y + rmse_d
+            eval_model = "nan"
     
     if not torch.isnan(mae) and not torch.isnan(rmse):
         if use_treatment:
@@ -784,18 +884,33 @@ def nan_filtered_loss(pred, target, criterion):
     valid_indices = torch.where(~torch.isnan(pred))[0]
     return criterion(pred[valid_indices], target[valid_indices])
 
-def cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, criterion, lambdas):
+def cetransformer_loss(x_reconstructed, x,   
+            enc_t_pred, enc_y_pred, enc_d_pred,
+            dec_t_pred, dec_y_pred, dec_d_pred,
+            z_mu, z_logvar,
+            t, y , d,
+            criterion,
+            lambdas,
+            t_loss=True):
     # Encoder Prediction Loss
     enc_y_loss = criterion(enc_y_pred, y)
     enc_d_loss = criterion(enc_d_pred, d)
-    enc_t_loss = criterion(enc_t_pred, t)
-    enc_loss = enc_y_loss + enc_d_loss + enc_t_loss
+    if t_loss:
+        enc_t_loss = criterion(enc_t_pred, t)
+        enc_loss = enc_y_loss + enc_d_loss + enc_t_loss
+    else:
+        enc_t_loss = None
+        enc_loss = enc_y_loss + enc_d_loss
 
     # Decoder Prediction Loss
     dec_y_loss = criterion(dec_y_pred, y)
     dec_d_loss = criterion(dec_d_pred, d)
-    dec_t_loss = criterion(dec_t_pred, t)
-    dec_loss = dec_y_loss + dec_d_loss + dec_t_loss
+    if t_loss:
+        dec_t_loss = criterion(dec_t_pred, t)
+        dec_loss = dec_y_loss + dec_d_loss + dec_t_loss
+    else:
+        dec_t_loss = None
+        dec_loss = enc_y_loss + dec_d_loss
 
     pred_loss = enc_loss + dec_loss
     
