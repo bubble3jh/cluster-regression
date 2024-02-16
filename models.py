@@ -192,7 +192,7 @@ class CEVAEEmbedding(torch.nn.Module):
         reduction : "mean" : cluster 별 평균으로 reduction
                     "date" : cluster 내 date 평균으로 reduction
     '''
-    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="date", shift=False):
+    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="date", shift=False, use_treatment = False):
         super().__init__()
         self.shift = shift
         self.reduction = reduction
@@ -205,7 +205,7 @@ class CEVAEEmbedding(torch.nn.Module):
             self.cont_p_NN = nn.Sequential(nn.Linear(3, emb_hidden_dim),
                                         activation,
                                         nn.Linear(emb_hidden_dim, nn_dim))
-            self.cont_c_NN = nn.Sequential(nn.Linear(1, emb_hidden_dim),
+            self.cont_c_NN = nn.Sequential(nn.Linear(1 if use_treatment else 2, emb_hidden_dim),
                                         activation,
                                         nn.Linear(emb_hidden_dim, nn_dim))
         else:
@@ -846,7 +846,7 @@ class customTransformerEncoder(TransformerEncoder):
 
 
 class CETransformer(nn.Module):
-    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False, is_variational=False):
+    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False, is_variational=False, use_treatment=True):
         super(CETransformer, self).__init__()
         self.shift = shift
         self.unidir = unidir
@@ -860,7 +860,7 @@ class CETransformer(nn.Module):
             print("unidirectional attention applied")
         else:
             print("maxpool applied")
-        self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="none", shift= shift)
+        self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="none", shift= shift, use_treatment=use_treatment)
         # self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
         self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers, seq_wise=seq_wise)

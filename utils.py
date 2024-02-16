@@ -15,11 +15,11 @@ from collections import defaultdict
 from prettytable import PrettyTable
 ## Data----------------------------------------------------------------------------------------
 class Tabledata(Dataset):
-    def __init__(self, args, data, scale='minmax', use_treatment=False, binary_t=False):
-        self.use_treatment = use_treatment
+    def __init__(self, args, data, scale='minmax', binary_t=False):
+        self.use_treatment = args.use_treatment
         # padding tensors
         self.diff_tensor = torch.zeros([124,1])
-        if use_treatment:
+        if args.use_treatment:
             self.cont_tensor = torch.zeros([124,4])
         else:
             self.cont_tensor = torch.zeros([124,5])
@@ -47,16 +47,18 @@ class Tabledata(Dataset):
 
         ## 데이터 특성 별 분류 및 저장 ##
         self.cluster = data.iloc[:,0].values.astype('float32')
-        if use_treatment:
-            if not binary_t:
-                self.dis = data['dis'].values.astype('float32')
-            else:
-                print("use binary t")
-                self.dis = (data['dis'].values >= 0.5).astype('float32')
+        
+        if not binary_t:
+            self.dis = data['dis'].values.astype('float32')
+        else:
+            print("use binary t")
+            self.dis = (data['dis'].values >= 0.5).astype('float32')
+            
+        if args.use_treatment:
             self.cont_X = data.iloc[:, 1:6].drop(columns=['dis']).values.astype('float32')
         else:
-            self.dis=None
             self.cont_X = data.iloc[:, 1:6].values.astype('float32')
+        
         self.cat_X = data.iloc[:, 6:13].astype('category')
         self.diff_days = data.iloc[:, 13].values.astype('float32')
 
@@ -68,8 +70,8 @@ class Tabledata(Dataset):
             y = tukey_transformation(y, args)
             d = tukey_transformation(d, args)
         
-        self.y = torch.stack([y, d], dim=1)
-
+        self.yd = torch.stack([y, d], dim=1)
+        
         # 이산 데이터 정렬 및 저장#
         self.cat_cols = self.cat_X.columns
         self.cat_map = {col: {cat: i for i, cat in enumerate(self.cat_X[col].cat.categories)} for col in self.cat_cols}
@@ -103,14 +105,11 @@ class Tabledata(Dataset):
         cat_tensor_c = cat_tensor[:, 5:]
         cont_tensor_p = cont_tensor[:, :3]
         cont_tensor_c = cont_tensor[:, 3:]
-        y = self.y[index]
-        if not self.use_treatment:
-            return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor
-        else:
-            dis = torch.tensor(self.dis[index])
-            # return cont_tensor, cat_tensor, data_len, y, diff_tensor, dis
-            return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, y, diff_tensor, dis
-
+        yd = self.yd[index]
+        dis = torch.mean(torch.tensor(self.dis[self.cluster == index]))
+        
+        return cont_tensor_p, cont_tensor_c, cat_tensor_p, cat_tensor_c, data_len, yd, diff_tensor, dis
+    
 class CEVAEdataset():
     def __init__(self, data, scale='minmax', t_type="multi"):
         columns = ['cluster', 'dis', 'danger','age', 'CT_R', 'CT_E', 'gender', 'is_korean',
@@ -194,7 +193,8 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
     eval_loss_y = None; eval_loss_d=None
     model.train()
     optimizer.zero_grad()
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *t = data_load(data, use_treatment)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *t = data_load(data)
+    # import pdb;pdb.set_trace()
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
     if use_treatment:
         gt_t = t[0]
@@ -215,7 +215,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
             # x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
             x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
             
-            loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t, y[:,0] , y[:,1], criterion, lambdas, False)
+            loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t, y[:,0] , y[:,1], criterion, lambdas, False) # False
             (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (_, _) = ind_losses
         else:
             loss_d = criterion(out[:,0], y[:,0])
@@ -300,7 +300,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
 def valid(args, data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC_sample=1):
     model.eval()
     
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data)
     accumulated_outputs = [0] * 6  # (x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred)
 
     if use_treatment:
@@ -390,7 +390,7 @@ def test(args, data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC
     
     model.eval()
 
-    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data, use_treatment)
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
 
     accumulated_outputs = [0] * 6  # (x, x_reconstructed, enc_yd_pred, enc_t_pred, dec_yd_pred, dec_t_pred)
@@ -589,7 +589,7 @@ def estimate_counterfactuals(model, dataloader, a_y, b_y, a_d, b_d, scaling="min
     all_counterfactual_differences = []
 
     for data in dataloader:
-        batch_num, cont_p, cont_c, cat_p, cat_c, len_, y, diff_days, *rest = data_load(data, use_treatment)
+        batch_num, cont_p, cont_c, cat_p, cat_c, len_, y, diff_days, *rest = data_load(data)
         if use_treatment:
             t_original = rest[0]
 
@@ -679,16 +679,53 @@ def print_average_differences(average_differences):
     # Print the table
     print(table)
 
-def data_load(data, use_treatment=False):
+def ATE(args, model, dataloader):
+    model.eval()  # 모델을 평가 모드로 설정
+    treatment_effects = []  # 각 데이터 포인트의 처리 효과를 저장할 리스트
+
+    for data in dataloader:
+        batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data)
+        gt_t = rest[0]
+        import pdb;pdb.set_trace()
+        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days, is_MAP=True)
+        x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
+        
+        X, original_t = batch  # 배치에서 특성 X와 원래 처리 t를 얻음
+        
+        # 원래 t를 제외한 다른 모든 t에 대해 예측 수행
+        for new_t in range(7):  # 새로운 t 값에 대한 루프 (0부터 6까지)
+            if new_t == original_t.item():  # 원래의 t와 같으면 건너뜀
+                continue
+            
+            # 새로운 t 값으로 X와 결합하여 모델 입력을 생성
+            new_t_tensor = torch.full_like(original_t, new_t)  # original_t와 같은 크기로 new_t 값으로 채움
+            model_input = torch.cat((X, new_t_tensor.unsqueeze(1)), dim=1)  # X와 new_t를 결합
+            
+            # 모델을 통해 예측 수행
+            predictions = model(model_input).detach().cpu().numpy()  # 모델 출력을 numpy 배열로 변환
+            
+            # 결과의 변화량 계산
+            delta_y = predictions - original_t  # 예측된 결과와 원래 결과의 차이
+            
+            # t의 변화량으로 y의 변화량을 나눔
+            delta_t = new_t - original_t.item()
+            treatment_effect = delta_y / delta_t
+            
+            # 계산된 처리 효과를 리스트에 추가
+            treatment_effects.append(treatment_effect)
+    
+    # 모든 데이터 포인트에 대한 처리 효과의 평균 계산
+    ATE = sum(treatment_effects) / len(treatment_effects)
+
+    return ATE
+    
+
+def data_load(data):
     # Move all tensors in the data tuple to GPU at once
     data = tuple(tensor.cuda() for tensor in data)
     
-    if use_treatment:
-        cont_p, cont_c, cat_p, cat_c, len, y, diff_days, dis = data
-        return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days, dis
-    else:
-        cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data
-        return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days, None
+    cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *dis = data
+    return cont_p.shape[0], cont_p, cont_c, cat_p, cat_c, len, y, diff_days, dis[0]
 
 def reverse_scaling(scaling, out, y, a_y, b_y, a_d, b_d):
     '''

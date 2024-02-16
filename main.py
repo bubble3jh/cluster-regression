@@ -74,7 +74,7 @@ parser.add_argument(
 
 parser.add_argument(
     "--use_treatment",
-    type=bool, default=False
+    type=bool, default=False, action='store_true'
 )
 
 parser.add_argument('--shift', action='store_true')
@@ -213,7 +213,7 @@ cutdates_num=0
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
 for i in range(0, cutdates_num+1):
     data = pd.read_csv(args.data_path+f"data_cut_{i}.csv")
-    dataset = utils.Tabledata(args, data, args.scaling, args.model=='cet')
+    dataset = utils.Tabledata(args, data, args.scaling)
     train_dataset, val_dataset, test_dataset = random_split(dataset, utils.data_split_num(dataset))
     tr_datasets.append(train_dataset)
     val_datasets.append(val_dataset)
@@ -247,8 +247,9 @@ if args.model == 'transformer':
 if args.model == 'cet':
     model = models.CETransformer(d_model=args.num_features, nhead=args.num_heads, d_hid=args.hidden_dim, 
                           nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
-                          unidir=args.unidir, is_variational=args.variational).to(args.device) # TODO: Hard coded for transformer layers
-    print("use treatment")
+                          unidir=args.unidir, is_variational=args.variational, use_treatment=args.use_treatment).to(args.device) # TODO: Hard coded for transformer layers
+    print("use cet model")
+    print(f"use treatment as feature : {not args.use_treatment}")
     # args.use_treatment=True
    
 elif args.model == "mlp":
@@ -446,6 +447,7 @@ for epoch in range(1, args.epochs + 1):
             best_val_models[i] = eval_model
             best_tr_models[i] = tr_eval_model
             
+            best_model = model
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
             # utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-date{i}_best_val.pt",
@@ -530,7 +532,8 @@ for epoch in range(1, args.epochs + 1):
         wandb.log(wandb_log)
 # ---------------------------------------------------------------------------------------------
 
-
+# Estimate Population average treatment effects
+# utils.ATE(args, best_model, val_dataloader)
 
 ## Print Best Model ---------------------------------------------------------------------------
 print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")

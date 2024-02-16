@@ -1,22 +1,22 @@
-GPU_IDS=(3 4 5 6 7)  # 사용할 GPU ID 리스트
+GPU_IDS=(2 3 4 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
 ## Coarse Search
 ## Cos Anneal
 ## unidirection best 0.001, 0.01 256 128 1 2
-run_group="large_cet_maxpoolandunidir_small_var_nomeanlayer"
-for lr_init in 1e-3 5e-4 1e-2
+run_group="t_fixed"
+for lr_init in 5e-3 1e-2
 do
-for wd in 1e-2 1e-3 1e-4 
+for wd in 1e-2 1e-3 #1e-4 
 do
-for drop_out in 0.0 0.3 # 0.5
+for drop_out in 0.0 #0.3 # 0.5
 do
-for hidden_dim in 1024 256 512
+for hidden_dim in 128 256
 do
-for num_features in 256 512 1024 #128 256 512
+for num_features in 128 256 #128 256 512
 do
-for num_layers in 1 3 #4 5
+for num_layers in 1 #3 #4 5
 do
-for num_heads in 2 8
+for num_heads in 2 4
 do
 for optim in "adam"
 do
@@ -27,6 +27,8 @@ do
 for lambda3 in 0 #0.1 1 10
 do
 for unidir in "" "--unidir" #""
+do
+for use_treatment in "" "--use_treatment"
 do
 CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --hidden_dim=${hidden_dim} \
@@ -43,7 +45,8 @@ CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --lambdas $lambda1 $lambda2 $lambda3 \
 --run_group=${run_group} \
 ${unidir} \
---MC_sample=1 &
+${use_treatment} \
+--MC_sample=1 
 
 # GPU ID를 다음 것으로 변경
 IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))
@@ -53,6 +56,7 @@ if [ $IDX -eq 0 ]; then
 wait
 fi
 
+done
 done
 done
 done
