@@ -678,7 +678,8 @@ def print_average_differences(average_differences):
     
     # Print the table
     print(table)
-
+    
+@torch.no_grad()
 def ATE(args, model, dataloader):
     model.eval()  # 모델을 평가 모드로 설정
     y_treatment_effects = []  

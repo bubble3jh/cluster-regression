@@ -532,7 +532,7 @@ for epoch in range(1, args.epochs + 1):
 # ---------------------------------------------------------------------------------------------
 
 # Estimate Population average treatment effects
-utils.ATE(args, best_model, val_dataloader)
+# utils.ATE(args, best_model, val_dataloader)
 
 ## Print Best Model ---------------------------------------------------------------------------
 print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")

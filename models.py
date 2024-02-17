@@ -822,7 +822,9 @@ class customTransformerEncoder(TransformerEncoder):
                 if mask is not None:
                     output_emb = output[torch.arange(output.size(0)), val_idx] # uni dir last
                 else:
-                    output_emb = torch.mean(output, dim=1) # average
+                    val_mask = torch.arange(output.size(1))[None, :].cuda() < val_len[:, None]
+                    output_emb = (output * val_mask.unsqueeze(-1).float()).sum(1) / val_mask.sum(1).unsqueeze(-1).float()
+                    # output_emb = torch.mean(output, dim=1) # average
                 t_pred = self.x2t(output_emb) 
                 t = t_pred if intervene_t == None else intervene_t
                 t_emb = self.t_emb(t)
@@ -831,7 +833,9 @@ class customTransformerEncoder(TransformerEncoder):
                 if mask is not None:
                     output_emb = output[torch.arange(output.size(0)), val_idx] # uni dir last
                 else:
-                    output_emb = torch.mean(output, dim=1) # average
+                    val_mask = torch.arange(output.size(1))[None, :].cuda() < val_len[:, None]
+                    output_emb = (output * val_mask.unsqueeze(-1).float()).sum(1) / val_mask.sum(1).unsqueeze(-1).float()
+                    # output_emb = torch.mean(output, dim=1) # average
                 yd = self.xt2yd(output_emb)
                 yd_emb = self.yd_emb(yd)
             elif idx == 2:
