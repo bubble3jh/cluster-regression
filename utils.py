@@ -697,13 +697,14 @@ def ATE(args, model, dataloader):
         _, original_t_pred, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
         
         for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
+            intervene_t_value = intervene_t_value / 6 # normalize
             # intervene_t를 배치 크기와 같은 텐서로 생성
             intervene_t = torch.full((x.size(0),), intervene_t_value, dtype=torch.float).unsqueeze(1).cuda()
             # 이제 intervene_t를 모델에 전달
             _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
 
             delta_y = original_enc_yd - intervene_enc_yd
-            delta_t = original_t_pred - intervene_t  # intervene_t의 차원을 맞추기 위해 unsqueeze 사용
+            delta_t = original_t_pred - intervene_t  
             
             treatment_effect = delta_y / delta_t # TODO: 값이 모든 batch에 따라 동일하게 나오는데 이유가 뭐지?
             y_treatment_effects.append(torch.mean(treatment_effect, dim=0)[0].item())
