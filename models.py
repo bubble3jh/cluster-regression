@@ -721,7 +721,7 @@ class customTransformerEncoder(TransformerEncoder):
         self.yd_emb = MLP(2,d_model//2, d_model, num_layers=pred_layers) # Linear
         self.seq_wise = seq_wise
 
-    def forward(self, src: Tensor, mask: Tensor | None = None, src_key_padding_mask: Tensor | None = None, is_causal: bool | None = None, val_len: Tensor | None = None) -> Tensor:
+    def forward(self, src: Tensor, mask: Tensor | None = None, src_key_padding_mask: Tensor | None = None, is_causal: bool | None = None, val_len: Tensor | None = None, intervene_t: Tensor | None = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -823,7 +823,8 @@ class customTransformerEncoder(TransformerEncoder):
                     output_emb = output[torch.arange(output.size(0)), val_idx] # uni dir last
                 else:
                     output_emb = torch.mean(output, dim=1) # average
-                t = self.x2t(output_emb)
+                t_pred = self.x2t(output_emb) 
+                t = t_pred if intervene_t == None else intervene_t
                 t_emb = self.t_emb(t)
             elif idx == 1:
                 output = output + t_emb.unsqueeze(1)
@@ -841,9 +842,7 @@ class customTransformerEncoder(TransformerEncoder):
 
         if self.norm is not None:
             output = self.norm(output)
-
         return output, t, yd
-
 
 class CETransformer(nn.Module):
     def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False, is_variational=False, use_treatment=True):

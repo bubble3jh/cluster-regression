@@ -46,7 +46,7 @@ CUDA_VISIBLE_DEVICES=${GPU_IDS[$IDX]} python main.py --model=cet \
 --run_group=${run_group} \
 ${unidir} \
 ${use_treatment} \
---MC_sample=1 
+--MC_sample=1 &
 
 # GPU ID를 다음 것으로 변경
 IDX=$(( ($IDX + 1) % ${#GPU_IDS[@]} ))

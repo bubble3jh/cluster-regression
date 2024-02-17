@@ -681,43 +681,39 @@ def print_average_differences(average_differences):
 
 def ATE(args, model, dataloader):
     model.eval()  # 모델을 평가 모드로 설정
-    treatment_effects = []  # 각 데이터 포인트의 처리 효과를 저장할 리스트
+    y_treatment_effects = []  
+    d_treatment_effects = [] 
 
     for data in dataloader:
-        batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *rest = data_load(data)
+        batch_num, cont_p, cont_c, cat_p, cat_c, val_len, y, diff_days, *rest = data_load(data)
         gt_t = rest[0]
-        import pdb;pdb.set_trace()
-        out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days, is_MAP=True)
-        x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
-        
-        X, original_t = batch  # 배치에서 특성 X와 원래 처리 t를 얻음
-        
-        # 원래 t를 제외한 다른 모든 t에 대해 예측 수행
-        for new_t in range(7):  # 새로운 t 값에 대한 루프 (0부터 6까지)
-            if new_t == original_t.item():  # 원래의 t와 같으면 건너뜀
-                continue
-            
-            # 새로운 t 값으로 X와 결합하여 모델 입력을 생성
-            new_t_tensor = torch.full_like(original_t, new_t)  # original_t와 같은 크기로 new_t 값으로 채움
-            model_input = torch.cat((X, new_t_tensor.unsqueeze(1)), dim=1)  # X와 new_t를 결합
-            
-            # 모델을 통해 예측 수행
-            predictions = model(model_input).detach().cpu().numpy()  # 모델 출력을 numpy 배열로 변환
-            
-            # 결과의 변화량 계산
-            delta_y = predictions - original_t  # 예측된 결과와 원래 결과의 차이
-            
-            # t의 변화량으로 y의 변화량을 나눔
-            delta_t = new_t - original_t.item()
-            treatment_effect = delta_y / delta_t
-            
-            # 계산된 처리 효과를 리스트에 추가
-            treatment_effects.append(treatment_effect)
-    
-    # 모든 데이터 포인트에 대한 처리 효과의 평균 계산
-    ATE = sum(treatment_effects) / len(treatment_effects)
 
-    return ATE
+        # Model의 encoder 부분에서 t와 yd를 예측하고 이 값을 사용하니, Transformer encoder 부분만 불러와서 forward
+        (x, diff_days, _), start_tok = model.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+        src_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+        src_mask = model.generate_square_subsequent_mask(x.size(1)).cuda() if model.unidir else None
+
+        # Input X를 기반으로 하는 encoder의 예측치 t를 original t 로 사용
+        _, original_t_pred, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
+        
+        for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
+            # intervene_t를 배치 크기와 같은 텐서로 생성
+            intervene_t = torch.full((x.size(0),), intervene_t_value, dtype=torch.float).unsqueeze(1).cuda()
+            # 이제 intervene_t를 모델에 전달
+            _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
+
+            delta_y = original_enc_yd - intervene_enc_yd
+            delta_t = original_t_pred - intervene_t  # intervene_t의 차원을 맞추기 위해 unsqueeze 사용
+            
+            treatment_effect = delta_y / delta_t # TODO: 값이 모든 batch에 따라 동일하게 나오는데 이유가 뭐지?
+            y_treatment_effects.append(torch.mean(treatment_effect, dim=0)[0].item())
+            d_treatment_effects.append(torch.mean(treatment_effect, dim=0)[1].item())
+            import pdb;pdb.set_trace()
+    # 모든 데이터 포인트에 대한 처리 효과의 평균 계산
+    ATE_y = sum(y_treatment_effects) / len(y_treatment_effects) if y_treatment_effects else 0
+    ATE_d = sum(d_treatment_effects) / len(d_treatment_effects) if d_treatment_effects else 0
+
+    return ATE_y, ATE_d
     
 
 def data_load(data):

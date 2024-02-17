@@ -73,11 +73,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--use_treatment",
-    type=bool, default=False, action='store_true'
+    "--use_treatment", action='store_true'
 )
 
-parser.add_argument('--shift', action='store_true')
+parser.add_argument('--shift', action='store_true', help='do not use treatment as feature (default false)')
 
 parser.add_argument(
     "--MC_sample",
@@ -533,7 +532,7 @@ for epoch in range(1, args.epochs + 1):
 # ---------------------------------------------------------------------------------------------
 
 # Estimate Population average treatment effects
-# utils.ATE(args, best_model, val_dataloader)
+utils.ATE(args, best_model, val_dataloader)
 
 ## Print Best Model ---------------------------------------------------------------------------
 print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")
