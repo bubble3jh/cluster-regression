@@ -681,7 +681,7 @@ def print_average_differences(average_differences):
     
 @torch.no_grad()
 def ATE(args, model, dataloader):
-    model.eval()  # 모델을 평가 모드로 설정
+    model.eval()  
     y_treatment_effects = []  
     d_treatment_effects = [] 
 
@@ -697,20 +697,32 @@ def ATE(args, model, dataloader):
         # Input X를 기반으로 하는 encoder의 예측치 t를 original t 로 사용
         _, original_t_pred, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
         
-        for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
-            intervene_t_value = intervene_t_value / 6 # normalize
-            # intervene_t를 배치 크기와 같은 텐서로 생성
-            intervene_t = torch.full((x.size(0),), intervene_t_value, dtype=torch.float).unsqueeze(1).cuda()
-            # 이제 intervene_t를 모델에 전달
-            _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
+        # for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
+        #     intervene_t_value = intervene_t_value / 6 # normalize
+        #     # intervene_t를 배치 크기와 같은 텐서로 생성
+        #     intervene_t = torch.full((x.size(0),), intervene_t_value, dtype=torch.float).unsqueeze(1).cuda()
+        #     # 이제 intervene_t를 모델에 전달
+        #     _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
 
-            delta_y = original_enc_yd - intervene_enc_yd
-            delta_t = original_t_pred - intervene_t  
+        #     delta_y = original_enc_yd - intervene_enc_yd
+        #     delta_t = original_t_pred - intervene_t  
             
-            treatment_effect = delta_y / delta_t # TODO: 값이 모든 batch에 따라 동일하게 나오는데 이유가 뭐지?
-            y_treatment_effects.append(torch.mean(treatment_effect, dim=0)[0].item())
-            d_treatment_effects.append(torch.mean(treatment_effect, dim=0)[1].item())
-            import pdb;pdb.set_trace()
+        #     treatment_effect = delta_y / delta_t # TODO: 값이 모든 batch에 따라 동일하게 나오는데 이유가 뭐지?
+        #     y_treatment_effects.append(torch.mean(treatment_effect, dim=0)[0].item())
+        #     d_treatment_effects.append(torch.mean(treatment_effect, dim=0)[1].item())
+        
+        # intervene_t를 original + 1 로 설정
+        intervene_t = original_t_pred.clone() + 1/6
+
+        _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
+
+        delta_y = original_enc_yd - intervene_enc_yd
+        delta_t = original_t_pred - intervene_t  
+        
+        treatment_effect = delta_y / delta_t # TODO: 값이 모든 batch에 따라 동일하게 나오는데 이유가 뭐지?
+        y_treatment_effects.append(torch.mean(treatment_effect, dim=0)[0].item())
+        d_treatment_effects.append(torch.mean(treatment_effect, dim=0)[1].item())
+            
     # 모든 데이터 포인트에 대한 처리 효과의 평균 계산
     ATE_y = sum(y_treatment_effects) / len(y_treatment_effects) if y_treatment_effects else 0
     ATE_d = sum(d_treatment_effects) / len(d_treatment_effects) if d_treatment_effects else 0
@@ -945,7 +957,7 @@ def cetransformer_loss(x_reconstructed, x,
         dec_loss = dec_y_loss + dec_d_loss + dec_t_loss
     else:
         dec_t_loss = None
-        dec_loss = enc_y_loss + dec_d_loss
+        dec_loss = dec_y_loss + dec_d_loss
 
     pred_loss = enc_loss + dec_loss
     
@@ -971,4 +983,5 @@ def cetransformer_loss(x_reconstructed, x,
     # recon_loss = nan_filtered_loss(x_reconstructed, x, criterion)
 
     total_loss = lambdas[0]*pred_loss #+ lambdas[1]*kl_loss #+ lambdas[2]*recon_loss
+    # total_loss = lambdas[0]*enc_y_loss + lambdas[1]*enc_d_loss #+ lambdas[2]*recon_loss
     return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss), (enc_t_loss, dec_t_loss)

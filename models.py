@@ -828,8 +828,9 @@ class customTransformerEncoder(TransformerEncoder):
                 t_pred = self.x2t(output_emb) 
                 t = t_pred if intervene_t == None else intervene_t
                 t_emb = self.t_emb(t)
-            elif idx == 1:
                 output = output + t_emb.unsqueeze(1)
+            elif idx == 1:
+                # output = output + t_emb.unsqueeze(1)
                 if mask is not None:
                     output_emb = output[torch.arange(output.size(0)), val_idx] # uni dir last
                 else:
@@ -838,8 +839,9 @@ class customTransformerEncoder(TransformerEncoder):
                     # output_emb = torch.mean(output, dim=1) # average
                 yd = self.xt2yd(output_emb)
                 yd_emb = self.yd_emb(yd)
-            elif idx == 2:
                 output = output + yd_emb.unsqueeze(1)
+            # elif idx == 2:
+            #     output = output + yd_emb.unsqueeze(1)
 
         if convert_to_nested:
             output = output.to_padded_tensor(0., src.size())
