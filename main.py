@@ -229,13 +229,16 @@ for i in range(cutdates_num+1):
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
     val_dataloaders.append(val_dataloader); test_dataloaders.append(test_dataloader)
+
+print(f"use treatment as feature : {not args.use_treatment}")
 print("Successfully load data!")
 #-------------------------------------------------------------------------------------
 
 
 ## Model ------------------------------------------------------------------------------------
 if args.model == 'transformer':
-    model = models.Transformer(input_size=args.num_features, 
+    model = models.Transformer(args=args,
+                               input_size=args.num_features, 
                                hidden_size=args.hidden_dim, 
                                output_size=args.output_size, 
                                num_layers=args.num_layers, 
@@ -248,11 +251,11 @@ if args.model == 'cet':
                           nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
                           unidir=args.unidir, is_variational=args.variational, use_treatment=args.use_treatment).to(args.device) # TODO: Hard coded for transformer layers
     print("use cet model")
-    print(f"use treatment as feature : {not args.use_treatment}")
     # args.use_treatment=True
    
 elif args.model == "mlp":
-    model = models.MLPRegressor(input_size=args.num_features,
+    model = models.MLPRegressor(args=args,
+                               input_size=args.num_features,
                     hidden_size=args.hidden_dim,
                     num_layers=args.num_layers,
                     output_size=args.output_size,
@@ -260,7 +263,8 @@ elif args.model == "mlp":
                     disable_embedding=args.disable_embedding).to(args.device)
 
 elif args.model in ["linear", "ridge"]:
-    model = models.LinearRegression(input_size=args.num_features,
+    model = models.LinearRegression(args=args,
+                               input_size=args.num_features,
                     out_channels=args.output_size,
                     disable_embedding=args.disable_embedding).to(args.device)
 
@@ -313,7 +317,7 @@ best_epochs=[0] * (cutdates_num+1)
 best_val_loss_d = [9999] * (cutdates_num+1); best_val_loss_y = [9999] * (cutdates_num+1); best_val_loss_t = [9999] * (cutdates_num+1)
 best_val_models = [""] * (cutdates_num+1); best_tr_models = [""] * (cutdates_num+1)
 best_test_losses = [[9999 for j in range(4)] for i in range(cutdates_num+1)]
-
+tr_eval_model=None; tr_eval_loss_d=None; tr_eval_loss_y=None; tr_eval_loss_t=None
 if args.eval_model != None:
     args.epochs = 1
     tr_loss_d=0; tr_loss_y=0
@@ -449,11 +453,11 @@ for epoch in range(1, args.epochs + 1):
             best_model = model
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
-            # utils.save_checkpoint(file_path = f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-date{i}_best_val.pt",
-            #                     epoch = epoch,
-            #                     state_dict = model.state_dict(),
-            #                     optimizer = optimizer.state_dict(),
-            #                     )
+            utils.save_checkpoint(file_path = f"./best_model/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-date{i}_best_val.pt",
+                                epoch = epoch,
+                                state_dict = model.state_dict(),
+                                optimizer = optimizer.state_dict(),
+                                )
             if args.save_pred:
                 # save prediction and ground truth as csv
                 val_df = pd.DataFrame({'val_pred_y':val_pred_y_list,
@@ -532,7 +536,7 @@ for epoch in range(1, args.epochs + 1):
 # ---------------------------------------------------------------------------------------------
 
 # Estimate Population average treatment effects
-# utils.ATE(args, best_model, val_dataloader)
+utils.ATE(args, best_model, val_dataloader)
 
 ## Print Best Model ---------------------------------------------------------------------------
 print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")
@@ -553,7 +557,10 @@ if args.ignore_wandb == False:
         wandb.run.summary[f"best_te_rmse_loss (d) {date_key}"] = best_test_losses[i][2]
         wandb.run.summary[f"best_te_rmse_loss (y) {date_key}"] = best_test_losses[i][3]
         wandb.run.summary[f"best_te_rmse_loss {date_key}"] = best_test_losses[i][2] + best_test_losses[i][3]
-
+    
+    
+    wandb.run.summary["ATE_y"] = ATE_y
+    wandb.run.summary["ATE_d"] = ATE_d
     wandb.run.summary["tr_dat_num"] = concat_tr_num_data
     wandb.run.summary["val_dat_num"] : concat_val_num_data
     wandb.run.summary["te_dat_num"] : concat_te_num_data

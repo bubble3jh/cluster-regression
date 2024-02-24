@@ -13,12 +13,12 @@ from torch.nn.modules.transformer import _get_seq_len, _detect_is_causal_mask
 warnings.filterwarnings("ignore", "Converting mask without torch.bool dtype to bool")
 
 class MLPRegressor(nn.Module):
-    def __init__(self, input_size=128, hidden_size=64, num_layers=3, output_size=2, drop_out=0.0, disable_embedding=False):
+    def __init__(self, args, input_size=128, hidden_size=64, num_layers=3, output_size=2, drop_out=0.0, disable_embedding=False):
         super().__init__()
         self.num_layers = num_layers
         if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding)
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, use_treatment=args.use_treatment)
         self.layers = nn.ModuleList([nn.Linear(input_size, hidden_size, bias=True)])
         for _ in range(num_layers - 2):
             self.layers.append(nn.Linear(hidden_size, hidden_size, bias=True))
@@ -35,11 +35,11 @@ class MLPRegressor(nn.Module):
         return x
 
 class LinearRegression(torch.nn.Module):
-    def __init__(self, input_size=128, out_channels=2, disable_embedding=False):
+    def __init__(self, args, input_size=128, out_channels=2, disable_embedding=False):
         super().__init__()
         if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding)
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, use_treatment=args.use_treatment)
         self.linear1 = torch.nn.Linear(input_size, out_channels)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len, diff_days):
@@ -57,10 +57,10 @@ class Transformer(nn.Module):
         drop_out : DropOut 정도
         disable_embedding : 연속 데이터 embedding 여부
     '''
-    def __init__(self, input_size, hidden_size, output_size, num_layers, num_heads, drop_out, disable_embedding):
+    def __init__(self, args, input_size, hidden_size, output_size, num_layers, num_heads, drop_out, disable_embedding):
         super(Transformer, self).__init__()
         
-        self.embedding = TableEmbedding(output_size=input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="none") #reduction="date")
+        self.embedding = TableEmbedding(output_size=input_size, disable_embedding = disable_embedding, disable_pe=False, reduction="none", use_treatment=args.use_treatment) #reduction="date")
         self.cls_token = nn.Parameter(torch.randn(1, 1, input_size))
         self.transformer_layer = nn.TransformerEncoderLayer(
             d_model=input_size,
@@ -126,7 +126,7 @@ class TableEmbedding(torch.nn.Module):
         reduction : "mean" : cluster 별 평균으로 reduction
                     "date" : cluster 내 date 평균으로 reduction
     '''
-    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="mean"):
+    def __init__(self, output_size=128, disable_embedding=False, disable_pe=True, reduction="mean", use_treatment=False):
         super().__init__()
         self.reduction = reduction
         if self.reduction == "none":
@@ -139,7 +139,7 @@ class TableEmbedding(torch.nn.Module):
             self.cont_p_NN = nn.Sequential(nn.Linear(3, emb_hidden_dim),
                                         nn.ReLU(),
                                         nn.Linear(emb_hidden_dim, nn_dim))
-            self.cont_c_NN = nn.Sequential(nn.Linear(2, emb_hidden_dim),
+            self.cont_c_NN = nn.Sequential(nn.Linear(1 if use_treatment else 2, emb_hidden_dim),
                                         nn.ReLU(),
                                         nn.Linear(emb_hidden_dim, nn_dim))
         else:
