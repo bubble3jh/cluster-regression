@@ -208,7 +208,7 @@ if args.ignore_wandb == False:
        
 ## Load Data --------------------------------------------------------------------------------
 ### ./data/data_mod.ipynb 에서 기본적인 데이터 전처리  ###
-cutdates_num=0
+cutdates_num=5 # for baseline?
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
 for i in range(0, cutdates_num+1):
     data = pd.read_csv(args.data_path+f"data_cut_{i}.csv")
@@ -217,7 +217,6 @@ for i in range(0, cutdates_num+1):
     tr_datasets.append(train_dataset)
     val_datasets.append(val_dataset)
     test_datasets.append(test_dataset)
-
 train_dataset = tr_datasets[0]
 tr_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 print(f"Number of training Clusters : {len(train_dataset)}")
