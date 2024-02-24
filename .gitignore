@@ -6,3 +6,4 @@ exp_results
 vis
 ray_tune.py
 viz.py
+best_model/*
