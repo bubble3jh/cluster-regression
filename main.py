@@ -348,9 +348,10 @@ for epoch in range(1, args.epochs + 1):
             tr_epoch_eval_loss_y += tr_eval_loss_y
             if args.use_treatment:            
                 tr_epoch_eval_loss_t += indv_loss[0]
-            tr_epoch_pred_loss += indv_loss[1]
-            tr_epoch_kl_loss += indv_loss[2]
-            tr_epoch_recon_loss += indv_loss[3]
+            
+            tr_epoch_pred_loss += indv_loss[1][0]
+            tr_epoch_kl_loss += indv_loss[1][1]
+            tr_epoch_recon_loss += indv_loss[1][2]
             
             concat_tr_num_data += tr_num_data
 

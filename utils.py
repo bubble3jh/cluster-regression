@@ -806,7 +806,7 @@ def cetransformer_loss(x_reconstructed, x,
 
     # Reconstruction Loss
     recon_loss = criterion(x_reconstructed, x)
-    import pdb;pdb.set_trace()
+    
     # Encoder Prediction Loss
     # enc_y_loss = nan_filtered_loss(enc_y_pred, y, criterion)
     # enc_d_loss = nan_filtered_loss(enc_d_pred, d, criterion)

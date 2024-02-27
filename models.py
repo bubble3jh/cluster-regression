@@ -886,7 +886,7 @@ class CETransformer(nn.Module):
         self.t_emb = MLP(1, d_model//2, d_model, num_layers=pred_layers) # Linear
         self.zt2yd = MLP(d_model, d_model//2, 2, num_layers=pred_layers) # Linear
 
-        self.linear_decoder = MLP(d_hid, d_model, d_model, num_layers=1) # Linear
+        self.linear_decoder = MLP(d_model, d_model, d_model, num_layers=1) # Linear
         # self.init_weights(1)
 
     # def generate_square_subsequent_mask(self, sz):
