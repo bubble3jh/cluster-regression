@@ -326,7 +326,8 @@ if args.eval_model != None:
 for epoch in range(1, args.epochs + 1):
     lr = optimizer.param_groups[0]['lr']
     tr_epoch_eval_loss_d=0; tr_epoch_eval_loss_y=0; tr_epoch_eval_loss_t=0; tr_epoch_loss_d = 0; tr_epoch_loss_y = 0; val_epoch_loss_d = 0; val_epoch_loss_y = 0; val_epoch_loss_t = 0; te_mae_epoch_loss_d = 0; te_mae_epoch_loss_y = 0; te_mae_epoch_loss_t = 0; te_mse_epoch_loss_d = 0; te_mse_epoch_loss_y = 0; te_mse_epoch_loss_t = 0
-
+    tr_epoch_pred_loss=0; tr_epoch_kl_loss=0; tr_epoch_recon_loss=0
+    
     concat_tr_num_data = 0; concat_val_num_data = 0; concat_te_num_data = 0
 
     tr_gt_y_list = []; val_gt_y_list = []; te_gt_y_list = []
@@ -338,7 +339,7 @@ for epoch in range(1, args.epochs + 1):
     if args.eval_model == None:
         for itr, data in enumerate(tr_dataloader):
             ## Training phase
-            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, tr_eval_loss_y, tr_eval_loss_d, tr_eval_model, *t_loss = utils.train(args, data, model, optimizer, criterion, epoch, lamb=args.lamb, eval_criterion=eval_criterion,
+            tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth, tr_eval_loss_y, tr_eval_loss_d, tr_eval_model, *indv_loss = utils.train(args, data, model, optimizer, criterion, epoch, lamb=args.lamb, eval_criterion=eval_criterion,
                                                                                                                                        a_y=train_dataset.dataset.a_y, a_d=train_dataset.dataset.a_d, b_y=train_dataset.dataset.b_y, b_d=train_dataset.dataset.b_d,
                                                                                                                                        use_treatment=args.use_treatment, lambdas=args.lambdas)
             tr_epoch_loss_d += tr_batch_loss_d
@@ -346,7 +347,11 @@ for epoch in range(1, args.epochs + 1):
             tr_epoch_eval_loss_d += tr_eval_loss_d
             tr_epoch_eval_loss_y += tr_eval_loss_y
             if args.use_treatment:            
-                tr_epoch_eval_loss_t += t_loss[0]
+                tr_epoch_eval_loss_t += indv_loss[0]
+            tr_epoch_pred_loss += indv_loss[1]
+            tr_epoch_kl_loss += indv_loss[2]
+            tr_epoch_recon_loss += indv_loss[3]
+            
             concat_tr_num_data += tr_num_data
 
             tr_pred_y_list += list(tr_predicted[:,0].cpu().detach().numpy())
@@ -360,6 +365,10 @@ for epoch in range(1, args.epochs + 1):
         tr_eval_loss_d = tr_epoch_eval_loss_d / concat_tr_num_data
         tr_eval_loss_y = tr_epoch_eval_loss_y / concat_tr_num_data
         tr_eval_loss_t = tr_epoch_eval_loss_t / concat_tr_num_data
+        
+        tr_pred_loss = tr_epoch_pred_loss / concat_tr_num_data
+        tr_kl_loss = tr_epoch_kl_loss / concat_tr_num_data
+        tr_recon_loss = tr_epoch_recon_loss / concat_tr_num_data
         
         if args.criterion == "RMSE":
             tr_loss_d = math.sqrt(tr_loss_d)
@@ -495,6 +504,9 @@ for epoch in range(1, args.epochs + 1):
         "train_eval/d": tr_eval_loss_d,
         "train_eval/y": tr_eval_loss_y,
         "train_eval/t [norm]": tr_eval_loss_t,
+        "train_pred_loss": tr_pred_loss,
+        "train_kld_loss" : tr_kl_loss,
+        "train_reconstruction_loss": tr_recon_loss, 
         "concat/valid_d": val_loss_d_list[0],
         "concat/valid_y": val_loss_y_list[0],
         "concat/valid_t [norm]": val_loss_t_list[0],

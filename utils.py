@@ -195,6 +195,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
     optimizer.zero_grad()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *t = data_load(data)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    eval_loss_t = None
     if use_treatment:
         gt_t = t[0]
         # x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
@@ -206,7 +207,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
         # loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, 0, 0, dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], None, None, t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas)
         
         # (warmup_loss_y, warmup_loss_d), (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
-        (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (enc_loss_t, dec_loss_t) = ind_losses
+        (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (enc_loss_t, dec_loss_t), (pred_loss, kl_loss, recon_loss) = ind_losses
         
     else:
         if args.model == 'cet':
@@ -215,7 +216,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
             x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
             
             loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t, y[:,0] , y[:,1], criterion, lambdas, False, val_len=len) # False
-            (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (_, _) = ind_losses
+            (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (_, _), (pred_loss, kl_loss, recon_loss) = ind_losses
         else:
             loss_d = criterion(out[:,0], y[:,0])
             loss_y = criterion(out[:,1], y[:,1])    
@@ -286,10 +287,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
     if not torch.isnan(loss):
         loss.backward()
         optimizer.step()
-        if use_treatment:
-            return loss_d.item(), loss_y.item(), batch_num, out, y, eval_loss_y, eval_loss_d, eval_model, eval_loss_t
-        else:
-            return loss_d.item(), loss_y.item(), batch_num, out, y, eval_loss_y, eval_loss_d, eval_model    
+        return loss_d.item(), loss_y.item(), batch_num, out, y, eval_loss_y, eval_loss_d, eval_model, eval_loss_t, (pred_loss, kl_loss, recon_loss)
     else:
         # return 0, batch_num, out, y
         raise ValueError("Loss raised nan.")
@@ -826,4 +824,4 @@ def cetransformer_loss(x_reconstructed, x,
 
     total_loss = lambdas[0]*pred_loss + lambdas[1]*kl_loss + lambdas[2]*recon_loss
     # total_loss = lambdas[0]*enc_y_loss + lambdas[1]*enc_d_loss #+ lambdas[2]*recon_loss
-    return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss), (enc_t_loss, dec_t_loss)
+    return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss), (enc_t_loss, dec_t_loss), (pred_loss, kl_loss, recon_loss)
