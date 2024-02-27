@@ -18,7 +18,7 @@ class MLPRegressor(nn.Module):
         self.num_layers = num_layers
         if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, use_treatment=args.use_treatment)
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, disable_pe=True, reduction="mean",  use_treatment=args.use_treatment)
         self.layers = nn.ModuleList([nn.Linear(input_size, hidden_size, bias=True)])
         for _ in range(num_layers - 2):
             self.layers.append(nn.Linear(hidden_size, hidden_size, bias=True))
@@ -39,7 +39,7 @@ class LinearRegression(torch.nn.Module):
         super().__init__()
         if disable_embedding:
             input_size = 12
-        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, use_treatment=args.use_treatment)
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, disable_pe=True, reduction="mean",  use_treatment=args.use_treatment)
         self.linear1 = torch.nn.Linear(input_size, out_channels)
 
     def forward(self, cont_p, cont_c, cat_p, cat_c, len, diff_days):
@@ -180,9 +180,10 @@ class TableEmbedding(torch.nn.Module):
             # import pdb;pdb.set_trace()
         if self.reduction == "none":   
             return (x, diff_days, val_len), self.positional_embedding(torch.tensor([5]).cuda())
-        else:
+        elif not self.disable_pe:
             return reduction_cluster(x, diff_days, val_len, self.reduction), self.positional_embedding(torch.tensor([5]).cuda())
-    
+        else:
+            return reduction_cluster(x, diff_days, val_len, self.reduction)
 
 class CEVAEEmbedding(torch.nn.Module):
     '''
@@ -885,6 +886,7 @@ class CETransformer(nn.Module):
         self.t_emb = MLP(1, d_model//2, d_model, num_layers=pred_layers) # Linear
         self.zt2yd = MLP(d_model, d_model//2, 2, num_layers=pred_layers) # Linear
 
+        self.linear_decoder = MLP(d_hid, d_model, d_model, num_layers=1) # Linear
         # self.init_weights(1)
 
     # def generate_square_subsequent_mask(self, sz):
@@ -940,6 +942,7 @@ class CETransformer(nn.Module):
         else:
             (x, diff_days, _), start_tok = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) # embedded:(32, 124, 128)
         
+        index_tensor = torch.arange(x.size(1), device=x.device)[None, :, None]
         # x = self.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days) #* math.sqrt(self.d_model)
         # src_mask = (torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
         src_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
@@ -975,7 +978,20 @@ class CETransformer(nn.Module):
         # Linear Decoder
         dec_yd = self.zt2yd(z.squeeze() + t_emb)
         
-        # Transformer Decoder
+        pos_embeddings = self.embedding.positional_embedding(diff_days.squeeze().long())
+
+        # 입력 z에 위치 임베딩 추가
+        z_expanded = z.unsqueeze(1) + pos_embeddings  # [batch_size, 124, hidden_dim]
+        z_expanded = torch.where(index_tensor < val_len[:, None, None], z_expanded, torch.zeros_like(z_expanded))
+        
+        # linear_decoder 적용
+        z_flat = z_expanded.view(-1, z.shape[-1])  # [batch_size * 5, hidden_dim]
+        x_recon_flat = self.linear_decoder(z_flat)  # [batch_size * 5, hidden_dim]
+
+        # 최종 x_recon을 원하는 형태로 재구성
+        x_recon = x_recon_flat.view(z_expanded.shape)  # [batch_size, 5, hidden_dim]
+        
+        # Reconstruction w/ Transformer Decoder
         # if self.shift:
         #     start_tok = start_tok.repeat(x.size(0), 1).unsqueeze(1)
         #     x_in = torch.cat([start_tok, x], dim=1)
@@ -986,7 +1002,15 @@ class CETransformer(nn.Module):
         # x_recon = self.transformer_decoder(tgt = x_in, memory = z, tgt_mask = tgt_mask, memory_mask = None, tgt_key_padding_mask=tgt_key_padding_mask, memory_key_padding_mask=src_mask)
         # return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t)
         
-        return x, torch.zeros([dec_yd.size(0),124, 128]), (enc_yd, enc_t), (dec_yd, dec_t), (z_mu, z_logvar)
+        # Reconstruction w/ Linear Decoder
+        
+        x = torch.where(index_tensor < val_len[:, None, None], x, torch.zeros_like(x))
+        x_recon = torch.where(index_tensor < val_len[:, None, None], x_recon, torch.zeros_like(x_recon))
+
+        # x = torch.where(torch.arange(x.size(1), device=x.device)[None, :] < val_len[:, None], x, torch.zeros_like(x))
+        # x_recon = torch.where(torch.arange(x_recon.size(1), device=x_recon.device)[None, :] < val_len[:, None], x_recon, torch.zeros_like(x))
+        
+        return x, x_recon, (enc_yd, enc_t), (dec_yd, dec_t), (z_mu, z_logvar)
     
 # class PositionalEncoding(nn.Module):
 #     def __init__(self, d_model, dropout=0.5, max_len=5000):

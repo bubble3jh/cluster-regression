@@ -208,7 +208,8 @@ if args.ignore_wandb == False:
        
 ## Load Data --------------------------------------------------------------------------------
 ### ./data/data_mod.ipynb 에서 기본적인 데이터 전처리  ###
-cutdates_num=5 # for baseline?
+# cutdates_num=0 if args.model=='cet' else 5 # 5 for baseline?
+cutdates_num=0
 tr_datasets = []; val_datasets = []; test_datasets = []; min_list=[]; max_list=[] 
 for i in range(0, cutdates_num+1):
     data = pd.read_csv(args.data_path+f"data_cut_{i}.csv")
@@ -535,7 +536,7 @@ for epoch in range(1, args.epochs + 1):
 # ---------------------------------------------------------------------------------------------
 
 # Estimate Population average treatment effects
-utils.ATE(args, best_model, val_dataloader)
+ATE_y, ATE_d = utils.ATE(args, best_model, val_dataloader)
 
 ## Print Best Model ---------------------------------------------------------------------------
 print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")
@@ -561,6 +562,6 @@ if args.ignore_wandb == False:
     wandb.run.summary["ATE_y"] = ATE_y
     wandb.run.summary["ATE_d"] = ATE_d
     wandb.run.summary["tr_dat_num"] = concat_tr_num_data
-    wandb.run.summary["val_dat_num"] : concat_val_num_data
-    wandb.run.summary["te_dat_num"] : concat_te_num_data
+    # wandb.run.summary["val_dat_num"] : concat_val_num_data
+    # wandb.run.summary["te_dat_num"] : concat_te_num_data
 # ---------------------------------------------------------------------------------------------

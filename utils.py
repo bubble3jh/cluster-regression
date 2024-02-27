@@ -202,7 +202,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
         
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
                                               #x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, criterion, lamdas
-        loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas)
+        loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas, val_len=len)
         # loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, 0, 0, dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], None, None, t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas)
         
         # (warmup_loss_y, warmup_loss_d), (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d) = ind_losses
@@ -214,7 +214,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
             # x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
             x, x_reconstructed, (enc_yd_pred, enc_t_pred), (dec_yd_pred, dec_t_pred), (z_mu, z_logvar) = out
             
-            loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t, y[:,0] , y[:,1], criterion, lambdas, False) # False
+            loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t, y[:,0] , y[:,1], criterion, lambdas, False, val_len=len) # False
             (enc_loss_y, enc_loss_d), (dec_loss_y, dec_loss_d), (_, _) = ind_losses
         else:
             loss_d = criterion(out[:,0], y[:,0])
@@ -506,49 +506,66 @@ def ATE(args, model, dataloader):
         batch_num, cont_p, cont_c, cat_p, cat_c, val_len, y, diff_days, *rest = data_load(data)
         gt_t = rest[0]
 
-        # Model의 encoder 부분에서 t와 yd를 예측하고 이 값을 사용하니, Transformer encoder 부분만 불러와서 forward
-        (x, diff_days, _), start_tok = model.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
-        src_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
-        src_mask = model.generate_square_subsequent_mask(x.size(1)).cuda() if model.unidir else None
+        if args.use_treatment:
+            if args.model == 'cet':
+                # Model의 encoder 부분에서 t와 yd를 예측하고 이 값을 사용하니, Transformer encoder 부분만 불러와서 forward
+                (x, diff_days, _), start_tok = model.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+                src_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
+                src_mask = model.generate_square_subsequent_mask(x.size(1)).cuda() if model.unidir else None
 
-        # Input X를 기반으로 하는 encoder의 예측치 t를 original t 로 사용
-        _, original_t_pred, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
-        
-        # intervene_t를 모든 가능한 t 로 설정
-        for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
-            intervene_t_value = intervene_t_value / 6 # normalize
-            # intervene_t를 배치 크기와 같은 텐서로 생성
-            intervene_t = torch.full((x.size(0),), intervene_t_value, dtype=torch.float).unsqueeze(1).cuda()
-            # 이제 intervene_t를 모델에 전달
-            _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
+                # Input X를 기반으로 하는 encoder의 예측치 t를 original t 로 사용
+                _, original_t_pred, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
+                
+                # intervene_t를 모든 가능한 t 로 설정
+                # for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
+                for intervene_t_value in [x * 0.1 for x in range(0, 61)]:
+                    intervene_t_value = intervene_t_value / 6 # normalize
+                    # intervene_t를 배치 크기와 같은 텐서로 생성
+                    intervene_t = torch.full((x.size(0),), intervene_t_value, dtype=torch.float).unsqueeze(1).cuda()
+                    # 이제 intervene_t를 모델에 전달
+                    _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
 
-            delta_y = original_enc_yd - intervene_enc_yd
-            delta_t = original_t_pred - intervene_t  
+                    delta_y = original_enc_yd - intervene_enc_yd
+                    delta_t = original_t_pred - intervene_t  
+                    
+                    delta_y, delta_d, _, _ = reverse_scaling(args.scaling, delta_y, y, dataloader.dataset.dataset.a_y, dataloader.dataset.dataset.b_y, dataloader.dataset.dataset.a_d, dataloader.dataset.dataset.b_d)
             
-            delta_y, delta_d, _, _ = reverse_scaling(args.scaling, delta_y, y, dataloader.dataset.dataset.a_y, dataloader.dataset.dataset.b_y, dataloader.dataset.dataset.a_d, dataloader.dataset.dataset.b_d)
-    
-            y_treatment_effect = delta_y / delta_t.squeeze() 
-            d_treatment_effect = delta_d / delta_t.squeeze() 
+                    y_treatment_effect = delta_y / delta_t.squeeze() 
+                    d_treatment_effect = delta_d / delta_t.squeeze() 
+                    
+                    y_treatment_effects.append(torch.mean(y_treatment_effect, dim=0).item())
+                    d_treatment_effects.append(torch.mean(d_treatment_effect, dim=0).item())
+        else:
+            print(f"intervene t feature for {args.model}")
             
-            y_treatment_effects.append(torch.mean(y_treatment_effect, dim=0).item())
-            d_treatment_effects.append(torch.mean(d_treatment_effect, dim=0).item())
-        
-        # intervene_t를 original + 1 로 설정
-        # intervene_t = original_t_pred.clone() + 1/6
+            original_t = cont_c[:,:,0].clone()
+            original_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+            
+            non_zero_indices = cont_c[:,:,0] != 0
 
-        # _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
-
-        # delta_y = original_enc_yd - intervene_enc_yd
-        # delta_t = original_t_pred - intervene_t  
+            # intervene_t를 모든 가능한 t 로 설정
+            for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
+                intervene_t_value = intervene_t_value / 6 # normalize
+                
+                cont_c[:,:,0][non_zero_indices] = intervene_t_value
+                # 이제 intervene_t를 모델에 전달
+                intervene_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+                
+                delta_y = original_yd - intervene_yd
+                delta_t = original_t[:,0] - intervene_t_value
+                
+                delta_y, delta_d, _, _ = reverse_scaling(args.scaling, delta_y, y, dataloader.dataset.dataset.a_y, dataloader.dataset.dataset.b_y, dataloader.dataset.dataset.a_d, dataloader.dataset.dataset.b_d)
         
-        # treatment_effect = delta_y / delta_t
-        # y_treatment_effects.append(torch.mean(treatment_effect, dim=0)[0].item())
-        # d_treatment_effects.append(torch.mean(treatment_effect, dim=0)[1].item())
+                y_treatment_effect = delta_y / delta_t.squeeze() 
+                d_treatment_effect = delta_d / delta_t.squeeze() 
+                
+                y_treatment_effects.append(torch.nanmean(y_treatment_effect, dim=0).item())
+                d_treatment_effects.append(torch.nanmean(d_treatment_effect, dim=0).item())
             
     # 모든 데이터 포인트에 대한 처리 효과의 평균 계산
     ATE_y = sum(y_treatment_effects) / len(y_treatment_effects) if y_treatment_effects else 0
     ATE_d = sum(d_treatment_effects) / len(d_treatment_effects) if d_treatment_effects else 0
-    
+
     print(f"ATE y : {ATE_y:.3f}, ATE d : {ATE_d:.3f}")
 
     return ATE_y, ATE_d
@@ -762,7 +779,8 @@ def cetransformer_loss(x_reconstructed, x,
             t, y , d,
             criterion,
             lambdas,
-            t_loss=True):
+            t_loss=True,
+            val_len=None):
     # Encoder Prediction Loss
     enc_y_loss = criterion(enc_y_pred, y)
     enc_d_loss = criterion(enc_d_pred, d)
@@ -786,11 +804,11 @@ def cetransformer_loss(x_reconstructed, x,
     pred_loss = enc_loss + dec_loss
     
     # KLD loss
-    # kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
+    kl_loss = -0.5 * torch.sum(1 + z_logvar - z_mu.pow(2) - z_logvar.exp())
 
     # Reconstruction Loss
-    #recon_loss = criterion(x_reconstructed, x)
-
+    recon_loss = criterion(x_reconstructed, x)
+    import pdb;pdb.set_trace()
     # Encoder Prediction Loss
     # enc_y_loss = nan_filtered_loss(enc_y_pred, y, criterion)
     # enc_d_loss = nan_filtered_loss(enc_d_pred, d, criterion)
@@ -806,6 +824,6 @@ def cetransformer_loss(x_reconstructed, x,
     # # Reconstruction Loss
     # recon_loss = nan_filtered_loss(x_reconstructed, x, criterion)
 
-    total_loss = lambdas[0]*pred_loss #+ lambdas[1]*kl_loss #+ lambdas[2]*recon_loss
+    total_loss = lambdas[0]*pred_loss + lambdas[1]*kl_loss + lambdas[2]*recon_loss
     # total_loss = lambdas[0]*enc_y_loss + lambdas[1]*enc_d_loss #+ lambdas[2]*recon_loss
     return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss), (enc_t_loss, dec_t_loss)
