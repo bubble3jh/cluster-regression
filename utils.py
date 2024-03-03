@@ -195,7 +195,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
     optimizer.zero_grad()
     batch_num, cont_p, cont_c, cat_p, cat_c, len, y, diff_days, *t = data_load(data)
     out = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
-    eval_loss_t = None
+    eval_loss_t = None; pred_loss=0; kl_loss=0; recon_loss=0
     if use_treatment:
         gt_t = t[0]
         # x, x_reconstructed, z_mu, z_logvar, enc_preds, dec_preds, warm_yd = out
