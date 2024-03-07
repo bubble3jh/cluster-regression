@@ -2,18 +2,18 @@ GPU_IDS=(2 3 4 5 6 7)  # 사용할 GPU ID 리스트
 IDX=0
 ## Coarse Search
 ## Cos Anneal
-run_group="recon_plus"
-for lr_init in 1e-2 1e-3 5e-3 
+run_group="clip_yd_add_recon"
+for lr_init in 5e-2 1e-2 #1e-3 #5e-3 
 do
-for wd in 1e-2 1e-3 1e-4 
+for wd in 5e-2 1e-2 5e-3 #1e-4 
 do
-for drop_out in 0.0 0.2 # 0.5
+for drop_out in 0.0 # 0.2 # 0.5
 do
 for hidden_dim in 128 256
 do
 for num_features in 64 128 256 #128 256 512
 do
-for num_layers in 1 2 #3 #4 5
+for num_layers in 1 #2 #3 #4 5
 do
 for num_heads in 4 8
 do
@@ -21,9 +21,9 @@ for optim in "adam"
 do
 for lambda1 in 1 #0.5 1 2 #0.5 1 2 
 do
-for lambda2 in 1 0.1 0.001 #1 2 #0.5 1 2 
+for lambda2 in 1e-3 1e-6 #1 2 #0.5 1 2 
 do
-for lambda3 in 0 0.1 0.001 #10
+for lambda3 in 1e-3 1e-6 #10
 do
 for unidir in "" #"" "--unidir"
 do
