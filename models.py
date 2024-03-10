@@ -1029,3 +1029,263 @@ class CETransformer(nn.Module):
 #     def forward(self, x):
 #         x = x + self.pe[:x.size(0)]
 #         return self.dropout(x)
+
+
+
+"""
+https://github.com/claudiashi57/dragonnet/blob/master/src/experiment/models.py
+"""
+class EpsilonLayer(torch.nn.Module):
+    def __init__(self):
+        super(EpsilonLayer, self).__init__()
+    
+    def forward(self, input):
+        epsilon = nn.Parameter(torch.randn_like(input), requires_grad=True)
+        return epsilon
+    
+    
+class DragonNet(nn.Module):
+    """
+    l2 regularizer 가 안 들어감. vs tf code
+        """
+    def __init__(self, args, 
+                input_size=128, hidden_size=200, output_size=2, num_layers=3, num_treatments=7, disable_embedding=False):
+        super(DragonNet, self).__init__()        
+        
+        self.num_layers = num_layers
+        if disable_embedding:
+            input_size = 12
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, disable_pe=True, reduction="mean",  use_treatment=args.use_treatment)
+        
+        # Representation
+        self.representation = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ELU()
+        )
+        
+        # t predictions
+        self.t_predictions = nn.Linear(hidden_size, num_treatments)
+        
+        # Hypothesis
+        self.y0_hidden = nn.Sequential(
+            nn.Linear(hidden_size, int(hidden_size//2)),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+        
+        self.y1_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+        
+        self.y2_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+        
+        self.y3_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+        
+        self.y4_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+        
+        self.y5_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+
+        self.y6_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+        
+        self.epsilon_layer = EpsilonLayer()
+        
+        
+    def forward(self, cont_p, cont_c, cat_p, cat_c, len, diff_days):
+        x = self.embedding(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+        x_rep = self.representation(x)
+        
+        t_pred = self.t_predictions(x_rep)
+        
+        y0_pred = self.y0_hidden(x_rep)
+        y1_pred = self.y1_hidden(x_rep)
+        y2_pred = self.y2_hidden(x_rep)
+        y3_pred = self.y3_hidden(x_rep)
+        y4_pred = self.y4_hidden(x_rep)
+        y5_pred = self.y5_hidden(x_rep)
+        y6_pred = self.y6_hidden(x_rep)
+        
+        epsilons = self.epsilon_layer(t_pred)
+        
+        return y0_pred, y1_pred, y2_pred, y3_pred, y4_pred, y5_pred, y6_pred, t_pred, epsilons
+    
+
+
+
+class TarNet(nn.Module):
+    def __init__(self, args, 
+                input_size=128, hidden_size=200, output_size=2, num_layers=3, num_treatments=7, disable_embedding=False):
+        super(TarNet, self).__init__()
+        self.num_layers = num_layers
+        if disable_embedding:
+            input_size = 12
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, disable_pe=True, reduction="mean",  use_treatment=args.use_treatment)
+        
+        # Representation
+        self.representation = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ELU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ELU()
+        )
+
+        # T Predictions
+        self.t_predictions = nn.Linear(input_size, num_treatments)
+
+        # Hypothesis
+        self.y0_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+
+        self.y1_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+        
+        self.y2_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+                
+        self.y3_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+                        
+        self.y4_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+                                
+        self.y5_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+                                        
+        self.y6_hidden = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, hidden_size//2),
+            nn.ELU(),
+            nn.Linear(hidden_size//2, output_size)
+        )
+
+        self.epsilon_layer = EpsilonLayer()
+
+
+    def forward(self, cont_p, cont_c, cat_p, cat_c, len, diff_days):
+        x = self.embedding(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+        x_rep = self.representation(x)
+
+        t_pred = self.t_predictions(x)
+
+        y0_pred = self.y0_hidden(x_rep)
+        y1_pred = self.y1_hidden(x_rep)
+        y2_pred = self.y2_hidden(x_rep)
+        y3_pred = self.y3_hidden(x_rep)
+        y4_pred = self.y4_hidden(x_rep)
+        y5_pred = self.y5_hidden(x_rep)
+        y6_pred = self.y6_hidden(x_rep)
+
+        epsilons = self.epsilon_layer(t_pred)
+        
+        return y0_pred, y1_pred, y2_pred, y3_pred, y4_pred, y5_pred, y6_pred, t_pred, epsilons
+
+
+'''
+## https://github.com/vveitch/causal-text-embeddings-tf2/blob/e9144b8643b92efef5dcbfcb1ccbe5448e76f5eb/src/causal_bert/bert_models.py#L58
+class DragonNet(nn.Module):
+    def __init__(self,  
+                args, 
+                input_size=128, hidden_size=200, num_layers=3, output_size=2, drop_out=0.0, disable_embedding=False,
+                num_treatments = 7):
+        super(DragonNet, self).__init__()
+        
+        self.num_treatments = num_treatments
+        self.num_layers = num_layers
+        if disable_embedding:
+            input_size = 12
+        self.embedding = TableEmbedding(input_size, disable_embedding = disable_embedding, disable_pe=True, reduction="mean",  use_treatment=args.use_treatment)
+        
+        self.q_layers = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU()
+        )
+
+        self.g_layer = nn.Linear(hidden_size, num_treatments)
+    
+        self.q_heads = nn.ModuleList([nn.Linear(hidden_size, output_size) for _ in range(num_treatments)])
+
+
+
+    def forward(self, cont_p, cont_c, cat_p, cat_c, len, diff_days):
+        z = self.embedding(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+        qz = self.q_layers(z)
+
+        qs = [head(qz) for head in self.q_heads]
+
+        g = self.g_layer(z)
+        return F.softmax(g, dim=-1).argmax(dim=1), [F.sigmoid(q) for q in qs]
+'''        

@@ -825,3 +825,129 @@ def cetransformer_loss(x_reconstructed, x,
     total_loss = lambdas[0]*pred_loss + lambdas[1]*kl_loss + lambdas[2]*recon_loss
     # total_loss = lambdas[0]*enc_y_loss + lambdas[1]*enc_d_loss #+ lambdas[2]*recon_loss
     return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss), (enc_t_loss, dec_t_loss), (pred_loss, kl_loss, recon_loss)
+
+
+
+
+
+##############################################################
+## DragonNet, TarNet
+##############################################################
+"""
+Ref
+[1] https://github.com/kochbj/Deep-Learning-for-Causal-Inference/issues/4
+[2] https://github.com/claudiashi57/dragonnet/issues/4
+"""
+
+
+def causal_yd_loss(yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, yd_true, t_pred, criterion):
+    t_pred = F.softmax(t_pred, dim=-1).argmax(dim=1).to(int)
+    
+    # hard-coded masking
+    mask_t0 = torch.zeros_like(t_pred); mask_t0[t_pred == 0] = True; mask_t0 = mask_t0.unsqueeze(1).expand(-1, 2)
+    mask_t1 = torch.zeros_like(t_pred); mask_t1[t_pred == 1] = True; mask_t1 = mask_t1.unsqueeze(1).expand(-1, 2)
+    mask_t2 = torch.zeros_like(t_pred); mask_t2[t_pred == 2] = True; mask_t2 = mask_t2.unsqueeze(1).expand(-1, 2)
+    mask_t3 = torch.zeros_like(t_pred); mask_t3[t_pred == 3] = True; mask_t3 = mask_t3.unsqueeze(1).expand(-1, 2)
+    mask_t4 = torch.zeros_like(t_pred); mask_t4[t_pred == 4] = True; mask_t4 = mask_t4.unsqueeze(1).expand(-1, 2)
+    mask_t5 = torch.zeros_like(t_pred); mask_t5[t_pred == 5] = True; mask_t5 = mask_t5.unsqueeze(1).expand(-1, 2)
+    mask_t6 = torch.zeros_like(t_pred); mask_t6[t_pred == 6] = True; mask_t6 = mask_t6.unsqueeze(1).expand(-1, 2)
+    yd_pred = mask_t0 * yd0_pred + mask_t1 * yd1_pred + mask_t2 * yd2_pred + mask_t3 * yd3_pred + mask_t4 * yd4_pred + mask_t5 * yd5_pred + mask_t6 * yd6_pred
+    
+    loss_y = criterion(yd_pred[:,0], yd_true[:,0])
+    loss_d = criterion(yd_pred[:,1], yd_true[:,1])
+    
+    return loss_y, loss_d, yd_pred
+
+
+
+def causal_t_loss(t_pred, t_true):
+    t_pred = 6 * t_pred
+    t_true = (6 * t_true).to(dtype=torch.long)
+    ce = nn.CrossEntropyLoss()
+    return ce(t_pred, t_true)
+
+
+
+def train_causal_model(args, data, model, optimizer, criterion):
+    
+    eval_loss_y = None; eval_loss_d=None
+    model.train()
+    optimizer.zero_grad()
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, yd_true, diff_days, *t = data_load(data)
+    
+    t_true = t[0]
+    yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, t_pred, epsilons = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    
+    loss_y, loss_d, yd_pred = causal_yd_loss(yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, yd_true, t_pred, criterion)
+    yd_pred_loss = loss_y + loss_d
+    # t_pred, t_true간의 crossentropy 계산이 안 됨
+    # RuntimeError: "nll_loss_forward_reduce_cuda_kernel_2d_index" not implemented for 'Float'
+    t_loss = causal_t_loss(t_pred, t_true)
+    total_loss = yd_pred_loss + args.alpha * t_loss
+                
+    if not torch.isnan(total_loss):
+        total_loss.backward()
+        optimizer.step()
+        return loss_d.item(), loss_y.item(), t_loss.item(), batch_num, yd_pred, yd_true
+    else:
+        # return 0, batch_num, out, y
+        raise ValueError("Loss raised nan.")
+
+
+@torch.no_grad()
+def valid_causal_model(args, data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
+    model.eval()
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, yd_true, diff_days, *t = data_load(data)
+
+    t_true = t[0]
+    yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, t_pred, epsilons = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    
+    _, _, yd_pred = causal_yd_loss(yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, yd_true, t_pred, eval_criterion)
+    pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, yd_pred, yd_true, a_y, b_y, a_d, b_d)
+    loss_y = eval_criterion(pred_y, gt_y)
+    loss_d = eval_criterion(pred_d, gt_d)
+    t_loss = causal_t_loss(t_pred, t_true)
+    
+    total_loss = loss_y + loss_d + args.alpha * t_loss
+    
+    if not torch.isnan(total_loss):
+        return loss_d.item(), loss_y.item(), t_loss.item(), batch_num, yd_pred, yd_true
+    else:
+        return 0, batch_num, yd_pred, yd_true
+    
+    
+    
+@torch.no_grad()
+def test_causal_model(args, data, model, scaling, a_y, b_y, a_d, b_d):
+    
+    criterion_mae = nn.L1Loss(reduction="sum")
+    criterion_rmse = nn.MSELoss(reduction="sum")
+    
+    model.eval()
+
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, yd_true, diff_days, *t = data_load(data)
+    
+    t_true = t[0]
+    yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, t_pred, epsilons = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+
+    # if out.shape == torch.Size([2]):
+    #     out = out.unsqueeze(0)
+    _, _, yd_pred = causal_yd_loss(yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, yd_true, t_pred, criterion_mae)
+    pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, yd_pred, yd_true, a_y, b_y, a_d, b_d)
+    
+    # MAE
+    mae_y = criterion_mae(pred_y, gt_y)
+    mae_d = criterion_mae(pred_d, gt_d)
+    mae = mae_y + mae_d
+    
+    # RMSE
+    rmse_y = criterion_rmse(pred_y, gt_y)
+    rmse_d = criterion_rmse(pred_d, gt_d)
+    rmse = rmse_y + rmse_d
+    
+    t_loss = causal_t_loss(t_pred, t_true)
+    
+    if not torch.isnan(mae) and not torch.isnan(rmse):
+        return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), t_loss.item(), batch_num, yd_pred, yd_true
+    else:
+        return 0, batch_num, yd_pred, yd_true
