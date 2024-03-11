@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.linear_model import LinearRegression
+
 import numpy as np
 import pandas as pd
 
@@ -495,14 +497,12 @@ def test(args, data, model, scaling, a_y, b_y, a_d, b_d, use_treatment=False, MC
         return 0, batch_num, out, y
 
 @torch.no_grad()
-def ATE(args, model, dataloader):
+def CE(args, model, dataloader):
     model.eval()  
-    y_treatment_effects = []  
-    d_treatment_effects = [] 
+    data_points_y = []; data_points_d=[]
 
     for data in dataloader:
-        batch_num, cont_p, cont_c, cat_p, cat_c, val_len, y, diff_days, *rest = data_load(data)
-        gt_t = rest[0]
+        _, cont_p, cont_c, cat_p, cat_c, val_len, y, diff_days, *rest = data_load(data)
 
         if args.use_treatment:
             if args.model == 'cet':
@@ -513,60 +513,107 @@ def ATE(args, model, dataloader):
 
                 # Input X를 기반으로 하는 encoder의 예측치 t를 original t 로 사용
                 _, original_t_pred, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
-                
+                saved_original_t_pred = original_t_pred.clone()
+                saved_original_enc_yd = original_enc_yd.clone()
                 # intervene_t를 모든 가능한 t 로 설정
                 # for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
                 for intervene_t_value in [x * 0.1 for x in range(0, 61)]:
+                    original_t_pred=saved_original_t_pred.clone()
+                    original_enc_yd=saved_original_enc_yd.clone()
+                    
                     intervene_t_value = intervene_t_value / 6 # normalize
+                    
                     # intervene_t를 배치 크기와 같은 텐서로 생성
                     intervene_t = torch.full((x.size(0),), intervene_t_value, dtype=torch.float).unsqueeze(1).cuda()
                     # 이제 intervene_t를 모델에 전달
                     _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
+                    
+                    if args.filter_out_clip:
+                        cond_original_enc_yd = (original_enc_yd == 0) | (original_enc_yd == 1)
+                        cond_intervene_enc_yd = (intervene_enc_yd == 0) | (intervene_enc_yd == 1)
+                        cond_original_t_pred = (original_t_pred == 0) | (original_t_pred == 1)
+                        
+                        # 조건 텐서들의 차원을 일치시키기
+                        cond_original_enc_yd_any = cond_original_enc_yd.any(dim=1)
+                        cond_intervene_enc_yd_any = cond_intervene_enc_yd.any(dim=1)
+                        # squeeze()를 사용하여 [32, 1]을 [32,]로 변경
+                        cond_original_t_pred_any = cond_original_t_pred.squeeze(-1)
+                        
+                        # 모든 조건을 결합하여 exclude_indices 계산
+                        exclude_indices = cond_original_enc_yd_any | cond_intervene_enc_yd_any | cond_original_t_pred_any
 
+                        # 이후 필터링된 텐서들을 조정
+                        original_t_pred = original_t_pred[~exclude_indices, :]
+                        original_enc_yd = original_enc_yd[~exclude_indices]
+                        intervene_enc_yd = intervene_enc_yd[~exclude_indices]
+                        intervene_t = intervene_t[~exclude_indices]
+                        
                     delta_y = original_enc_yd - intervene_enc_yd
-                    delta_t = original_t_pred - intervene_t  
+                    delta_t = (original_t_pred - intervene_t)*6  # denormalize 
                     
                     delta_y, delta_d, _, _ = reverse_scaling(args.scaling, delta_y, y, dataloader.dataset.dataset.a_y, dataloader.dataset.dataset.b_y, dataloader.dataset.dataset.a_d, dataloader.dataset.dataset.b_d)
             
-                    y_treatment_effect = delta_y / delta_t.squeeze() 
-                    d_treatment_effect = delta_d / delta_t.squeeze() 
-                    
-                    y_treatment_effects.append(torch.mean(y_treatment_effect, dim=0).item())
-                    d_treatment_effects.append(torch.mean(d_treatment_effect, dim=0).item())
+                    for i in range(delta_y.size(0)):
+                        data_points_y.append((delta_t[i].item(), delta_y[i].item()))
+                        data_points_d.append((delta_t[i].item(), delta_d[i].item()))
+                
         else:
             print(f"intervene t feature for {args.model}")
             
             original_t = cont_c[:,:,0].clone()
             original_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
             
-            non_zero_indices = cont_c[:,:,0] != 0
-
             # intervene_t를 모든 가능한 t 로 설정
             for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
                 intervene_t_value = intervene_t_value / 6 # normalize
                 
-                cont_c[:,:,0][non_zero_indices] = intervene_t_value
-                # 이제 intervene_t를 모델에 전달
+                # same_indices = cont_c[:,:,0] != intervene_t_value
+                # cont_c[:,:,0][same_indices] = intervene_t_value
+                cont_c[:,:,0] = intervene_t_value # TODO : have to check
+                # 이제 intervene_t를 모델에 전달 
                 intervene_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
                 
                 delta_y = original_yd - intervene_yd
-                delta_t = original_t[:,0] - intervene_t_value
+                delta_t = (original_t[:,0] - intervene_t_value)*6  # denormalize 
                 
                 delta_y, delta_d, _, _ = reverse_scaling(args.scaling, delta_y, y, dataloader.dataset.dataset.a_y, dataloader.dataset.dataset.b_y, dataloader.dataset.dataset.a_d, dataloader.dataset.dataset.b_d)
         
-                y_treatment_effect = delta_y / delta_t.squeeze() 
-                d_treatment_effect = delta_d / delta_t.squeeze() 
+                for i in range(delta_y.size(0)):
+                    data_points_y.append((delta_t[i].item(), delta_y[i].item()))
+                    data_points_d.append((delta_t[i].item(), delta_d[i].item()))
+                # y_treatment_effect = delta_y / delta_t.squeeze() 
+                # d_treatment_effect = delta_d / delta_t.squeeze() 
                 
-                y_treatment_effects.append(torch.nanmean(y_treatment_effect, dim=0).item())
-                d_treatment_effects.append(torch.nanmean(d_treatment_effect, dim=0).item())
-            
-    # 모든 데이터 포인트에 대한 처리 효과의 평균 계산
-    ATE_y = sum(y_treatment_effects) / len(y_treatment_effects) if y_treatment_effects else 0
-    ATE_d = sum(d_treatment_effects) / len(d_treatment_effects) if d_treatment_effects else 0
+                # y_treatment_effects.append(torch.nanmean(y_treatment_effect, dim=0).item())
+                # d_treatment_effects.append(torch.nanmean(d_treatment_effect, dim=0).item())
+    
+    def calculate_gradients_and_effect(data_points):
+        # 데이터 변환
+        del_t = data_points[:, 0]  # delta_t
+        del_var = data_points[:, 1]  # delta_y 또는 delta_d
 
-    print(f"ATE y : {ATE_y:.3f}, ATE d : {ATE_d:.3f}")
+        non_zero_indices = del_t != 0
+        del_t = del_t[non_zero_indices]
+        del_var = del_var[non_zero_indices]
+        
+        # 기울기 계산 및 음수 기울기 비율 계산
+        gradients = del_var / del_t
+        negative_acc = np.sum(gradients < 0) / len(gradients)
+        
+        # 선형 회귀 모델을 통한 처리 효과 계산
+        model = LinearRegression()
+        model.fit(del_t.reshape(-1, 1), del_var)
+        treatment_effect = model.coef_[0]
 
-    return ATE_y, ATE_d
+        return negative_acc, treatment_effect
+
+    negative_acc_y, ce_y = calculate_gradients_and_effect(np.array(data_points_y))
+    negative_acc_d, ce_d = calculate_gradients_and_effect(np.array(data_points_d))
+    
+    print(f"CE y : {ce_y:.3f}, CE d : {ce_d:.3f}")
+    print(f"CACC y : {negative_acc_y:.3f}, CACC d : {negative_acc_d:.3f}")
+
+    return negative_acc_y, negative_acc_d, ce_y, ce_d
     
 
 def data_load(data):

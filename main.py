@@ -36,6 +36,9 @@ parser.add_argument(
     type=int, default=0, choices=[0, 1, 2, 3, 4, 5],
     help="Cluster Date print date (Default : 0) if 0, use concated dataset"
 )
+
+parser.add_argument("--filter_out_clip", action='store_true',
+        help = "Filter out clamped data points when calculate causal effect (Default : False)")
 # Data ---------------------------------------------------------
 parser.add_argument(
     "--data_path",
@@ -463,7 +466,7 @@ for epoch in range(1, args.epochs + 1):
             best_model = model
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
-            utils.save_checkpoint(file_path = f"./best_model/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-date{i}_best_val.pt",
+            utils.save_checkpoint(file_path = f"./best_model/best_{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}-{args.seed}-date{i}_best_val.pt",
                                 epoch = epoch,
                                 state_dict = model.state_dict(),
                                 optimizer = optimizer.state_dict(),
@@ -549,11 +552,11 @@ for epoch in range(1, args.epochs + 1):
 # ---------------------------------------------------------------------------------------------
 
 # Estimate Population average treatment effects
-ATE_y, ATE_d = utils.ATE(args, best_model, val_dataloader)
+negative_acc_y, negative_acc_d, ce_y, ce_d = utils.CE(args, best_model, val_dataloader)
 
 ## Print Best Model ---------------------------------------------------------------------------
 print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")
-print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt'!!")
+print(f"The model saved as '{args.save_path}{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.drop_out}_best_val.pt'!!")
 if args.ignore_wandb == False:
     for i in range(cutdates_num+1):
         date_key = "concat" if i == 0 else f"date_{i}"
@@ -572,8 +575,10 @@ if args.ignore_wandb == False:
         wandb.run.summary[f"best_te_rmse_loss {date_key}"] = best_test_losses[i][2] + best_test_losses[i][3]
     
     
-    wandb.run.summary["ATE_y"] = ATE_y
-    wandb.run.summary["ATE_d"] = ATE_d
+    wandb.run.summary["CE_y"] = ce_y
+    wandb.run.summary["CE_d"] = ce_d
+    wandb.run.summary["CACC_y"] = negative_acc_y
+    wandb.run.summary["CACC_d"] = negative_acc_d
     wandb.run.summary["tr_dat_num"] = concat_tr_num_data
     # wandb.run.summary["val_dat_num"] : concat_val_num_data
     # wandb.run.summary["te_dat_num"] : concat_te_num_data
