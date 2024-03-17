@@ -147,6 +147,9 @@ parser.add_argument("--unidir", action='store_true',
 parser.add_argument("--variational", action='store_true',
         help = "variational z sampling (Default : False)")
 
+parser.add_argument("--residual_t", action='store_true',
+        help = "residual connection with t to yd (Default : False)")
+
 #----------------------------------------------------------------
 
 # Criterion -----------------------------------------------------
@@ -252,7 +255,8 @@ if args.model == 'transformer':
 if args.model == 'cet':
     model = models.CETransformer(d_model=args.num_features, nhead=args.num_heads, d_hid=args.hidden_dim, 
                           nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
-                          unidir=args.unidir, is_variational=args.variational, use_treatment=args.use_treatment).to(args.device) # TODO: Hard coded for transformer layers
+                          unidir=args.unidir, is_variational=args.variational, use_treatment=args.use_treatment
+                          ,residual_t=args.residual_t).to(args.device) # TODO: Hard coded for transformer layers
     print("use cet model")
     # args.use_treatment=True
    
