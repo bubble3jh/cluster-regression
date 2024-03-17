@@ -830,6 +830,7 @@ class customTransformerEncoder(TransformerEncoder):
                 t_pred = torch.clamp(t_pred, 0, 1) # min-max normalized
                 t = t_pred if intervene_t == None else intervene_t
                 t_emb = self.t_emb(t)
+                t_res = t_emb.clone()
                 output = output + t_emb.unsqueeze(1)
             elif idx == 1:
                 # output = output + t_emb.unsqueeze(1)
@@ -839,6 +840,8 @@ class customTransformerEncoder(TransformerEncoder):
                     val_mask = torch.arange(output.size(1))[None, :].cuda() < val_len[:, None]
                     output_emb = (output * val_mask.unsqueeze(-1).float()).sum(1) / val_mask.sum(1).unsqueeze(-1).float()
                     # output_emb = torch.mean(output, dim=1) # average
+                if self.residual_t:
+                    output_emb = output_emb + t_res
                 yd = self.xt2yd(output_emb)
                 yd = torch.clamp(yd, 0, 1)  # min-max normalized
                 yd_emb = self.yd_emb(yd)

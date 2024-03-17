@@ -503,22 +503,29 @@ def CE(args, model, dataloader):
 
     for data in dataloader:
         _, cont_p, cont_c, cat_p, cat_c, val_len, y, diff_days, *rest = data_load(data)
-
+        gt_t = rest[0]
+        
         if args.use_treatment:
             if args.model == 'cet':
                 # Model의 encoder 부분에서 t와 yd를 예측하고 이 값을 사용하니, Transformer encoder 부분만 불러와서 forward
-                (x, diff_days, _), start_tok = model.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+                (x, diff_days, _), _ = model.embedding(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
                 src_key_padding_mask = ~(torch.arange(x.size(1)).expand(x.size(0), -1).cuda() < val_len.unsqueeze(1)).cuda()
                 src_mask = model.generate_square_subsequent_mask(x.size(1)).cuda() if model.unidir else None
 
                 # Input X를 기반으로 하는 encoder의 예측치 t를 original t 로 사용
-                _, original_t_pred, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
-                saved_original_t_pred = original_t_pred.clone()
+                
+                # use original prediction with x2t_pred
+                # _, original_t, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len)
+
+                # use ground truth t instead of x2t_pred
+                original_t = gt_t.unsqueeze(1)
+                _, _, original_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=original_t)
+                
+                saved_original_t = original_t.clone()
                 saved_original_enc_yd = original_enc_yd.clone()
-                # intervene_t를 모든 가능한 t 로 설정
-                # for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
+                
                 for intervene_t_value in [x * 0.1 for x in range(0, 61)]:
-                    original_t_pred=saved_original_t_pred.clone()
+                    original_t=saved_original_t.clone()
                     original_enc_yd=saved_original_enc_yd.clone()
                     
                     intervene_t_value = intervene_t_value / 6 # normalize
@@ -528,28 +535,28 @@ def CE(args, model, dataloader):
                     # 이제 intervene_t를 모델에 전달
                     _, _, intervene_enc_yd = model.transformer_encoder(x, mask=src_mask, src_key_padding_mask=src_key_padding_mask, val_len=val_len, intervene_t=intervene_t)
                     
-                    if args.filter_out_clip:
-                        cond_original_enc_yd = (original_enc_yd == 0) | (original_enc_yd == 1)
-                        cond_intervene_enc_yd = (intervene_enc_yd == 0) | (intervene_enc_yd == 1)
-                        cond_original_t_pred = (original_t_pred == 0) | (original_t_pred == 1)
+                    # if args.filter_out_clip:
+                    #     cond_original_enc_yd = (original_enc_yd == 0) | (original_enc_yd == 1)
+                    #     cond_intervene_enc_yd = (intervene_enc_yd == 0) | (intervene_enc_yd == 1)
+                    #     cond_original_t = (original_t == 0) | (original_t == 1)
                         
-                        # 조건 텐서들의 차원을 일치시키기
-                        cond_original_enc_yd_any = cond_original_enc_yd.any(dim=1)
-                        cond_intervene_enc_yd_any = cond_intervene_enc_yd.any(dim=1)
-                        # squeeze()를 사용하여 [32, 1]을 [32,]로 변경
-                        cond_original_t_pred_any = cond_original_t_pred.squeeze(-1)
+                    #     # 조건 텐서들의 차원을 일치시키기
+                    #     cond_original_enc_yd_any = cond_original_enc_yd.any(dim=1)
+                    #     cond_intervene_enc_yd_any = cond_intervene_enc_yd.any(dim=1)
+                    #     # squeeze()를 사용하여 [32, 1]을 [32,]로 변경
+                    #     cond_original_t_any = cond_original_t.squeeze(-1)
                         
-                        # 모든 조건을 결합하여 exclude_indices 계산
-                        exclude_indices = cond_original_enc_yd_any | cond_intervene_enc_yd_any | cond_original_t_pred_any
+                    #     # 모든 조건을 결합하여 exclude_indices 계산
+                    #     exclude_indices = cond_original_enc_yd_any | cond_intervene_enc_yd_any | cond_original_t_any
 
-                        # 이후 필터링된 텐서들을 조정
-                        original_t_pred = original_t_pred[~exclude_indices, :]
-                        original_enc_yd = original_enc_yd[~exclude_indices]
-                        intervene_enc_yd = intervene_enc_yd[~exclude_indices]
-                        intervene_t = intervene_t[~exclude_indices]
+                    #     # 이후 필터링된 텐서들을 조정
+                    #     original_t = original_t[~exclude_indices, :]
+                    #     original_enc_yd = original_enc_yd[~exclude_indices]
+                    #     intervene_enc_yd = intervene_enc_yd[~exclude_indices]
+                    #     intervene_t = intervene_t[~exclude_indices]
                         
                     delta_y = original_enc_yd - intervene_enc_yd
-                    delta_t = (original_t_pred - intervene_t)*6  # denormalize 
+                    delta_t = (original_t - intervene_t)*6  # denormalize 
                     
                     delta_y, delta_d, _, _ = reverse_scaling(args.scaling, delta_y, y, dataloader.dataset.dataset.a_y, dataloader.dataset.dataset.b_y, dataloader.dataset.dataset.a_d, dataloader.dataset.dataset.b_d)
             
@@ -562,6 +569,7 @@ def CE(args, model, dataloader):
             
             original_t = cont_c[:,:,0].clone()
             original_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+            original_yd = torch.clamp(original_yd, 0, 1)
             
             # intervene_t를 모든 가능한 t 로 설정
             for intervene_t_value in range(7):  # 모든 가능한 t 값에 대해 반복
@@ -572,6 +580,9 @@ def CE(args, model, dataloader):
                 cont_c[:,:,0] = intervene_t_value # TODO : have to check
                 # 이제 intervene_t를 모델에 전달 
                 intervene_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+                
+                # for fair comaparison
+                intervene_yd = torch.clamp(intervene_yd, 0, 1)
                 
                 delta_y = original_yd - intervene_yd
                 delta_t = (original_t[:,0] - intervene_t_value)*6  # denormalize 
@@ -587,7 +598,7 @@ def CE(args, model, dataloader):
                 # y_treatment_effects.append(torch.nanmean(y_treatment_effect, dim=0).item())
                 # d_treatment_effects.append(torch.nanmean(d_treatment_effect, dim=0).item())
     
-    def calculate_gradients_and_effect(data_points):
+    def calculate_gradients_and_effect(data_points, method='coef'):
         # 데이터 변환
         del_t = data_points[:, 0]  # delta_t
         del_var = data_points[:, 1]  # delta_y 또는 delta_d
@@ -600,15 +611,18 @@ def CE(args, model, dataloader):
         gradients = del_var / del_t
         negative_acc = np.sum(gradients < 0) / len(gradients)
         
-        # 선형 회귀 모델을 통한 처리 효과 계산
-        model = LinearRegression()
-        model.fit(del_t.reshape(-1, 1), del_var)
-        treatment_effect = model.coef_[0]
-
+        if method == 'grad':
+            # 선형 회귀 모델을 통한 처리 효과 계산
+            model = LinearRegression()
+            model.fit(del_t.reshape(-1, 1), del_var)
+            treatment_effect = model.coef_[0]
+        elif method == 'mean':
+            treatment_effect = np.mean(gradients)
+            
         return negative_acc, treatment_effect
 
-    negative_acc_y, ce_y = calculate_gradients_and_effect(np.array(data_points_y))
-    negative_acc_d, ce_d = calculate_gradients_and_effect(np.array(data_points_d))
+    negative_acc_y, ce_y = calculate_gradients_and_effect(np.array(data_points_y), method = 'mean')
+    negative_acc_d, ce_d = calculate_gradients_and_effect(np.array(data_points_d), method = 'mean')
     
     print(f"CE y : {ce_y:.3f}, CE d : {ce_d:.3f}")
     print(f"CACC y : {negative_acc_y:.3f}, CACC d : {negative_acc_d:.3f}")
