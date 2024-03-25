@@ -186,6 +186,8 @@ parser.add_argument("--t_max", type=int, default=200,
                 help="T_max for Cosine Annealing Learning Rate Scheduler (Default : 200)")
 
 parser.add_argument("--lambdas", nargs='+', type=float, default=[1.0, 1.0, 1.0], help='pred loss + kld loss + recon loss')
+
+parser.add_argument("--sig_x0", type=float, default=0.25)
 #----------------------------------------------------------------
 
 parser.add_argument("--lamb", type=float, default=0.0,
@@ -330,6 +332,7 @@ if args.eval_model != None:
     tr_loss_d=0; tr_loss_y=0
     model.load_state_dict(torch.load(args.eval_model)['state_dict'])
 
+lambda0 = args.lambdas[1]
 for epoch in range(1, args.epochs + 1):
     lr = optimizer.param_groups[0]['lr']
     tr_epoch_eval_loss_d=0; tr_epoch_eval_loss_y=0; tr_epoch_eval_loss_t=0; tr_epoch_loss_d = 0; tr_epoch_loss_y = 0; val_epoch_loss_d = 0; val_epoch_loss_y = 0; val_epoch_loss_t = 0; te_mae_epoch_loss_d = 0; te_mae_epoch_loss_y = 0; te_mae_epoch_loss_t = 0; te_mse_epoch_loss_d = 0; te_mse_epoch_loss_y = 0; te_mse_epoch_loss_t = 0
@@ -342,7 +345,8 @@ for epoch in range(1, args.epochs + 1):
     
     tr_gt_d_list = []; val_gt_d_list = []; te_gt_d_list = []
     tr_pred_d_list = []; val_pred_d_list = []; te_pred_d_list = []
-
+    # kld loss sigmoid scheduling 
+    args.lambdas[1] = lambda0*utils.sigmoid_annealing(epoch, args.epochs, k=15, x0=args.sig_x0)
     if args.eval_model == None:
         for itr, data in enumerate(tr_dataloader):
             ## Training phase
@@ -527,6 +531,7 @@ for epoch in range(1, args.epochs + 1):
         "concat/test_d (rmse)": test_rmse_d_list[0],
         "concat/test_y (rmse)": test_rmse_y_list[0],
         "setting/lr": lr,
+        "setting/kld_lambda": args.lambdas[1]
         # "pred/tr_pred_y": wandb.Histogram(tr_pred_y_list),
         # "gt/tr_gt_y": wandb.Histogram(tr_gt_y_list),
         # "pred/tr_pred_d": wandb.Histogram(tr_pred_d_list),

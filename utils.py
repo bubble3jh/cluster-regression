@@ -205,6 +205,7 @@ def train(args, data, model, optimizer, criterion, epoch, warmup_iter=0, lamb=0.
         
         # loss, *ind_losses = cevae_loss_function(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, t, y[:,0] , y[:,1],warm_yd ,criterion, aux_criterion, binary_t)
                                               #x_reconstructed, x, enc_t_pred, enc_y_pred, enc_d_pred, dec_t_pred, dec_y_pred, dec_d_pred, z_mu, z_logvar, t, y , d, criterion, lamdas
+        
         loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, enc_yd_pred[:, 0], enc_yd_pred[:, 1], dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], z_mu, z_logvar, gt_t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas, val_len=len)
         # loss, *ind_losses = cetransformer_loss(x_reconstructed, x, enc_t_pred, 0, 0, dec_t_pred, dec_yd_pred[:, 0], dec_yd_pred[:, 1], None, None, t.unsqueeze(1), y[:,0] , y[:,1], criterion, lambdas)
         
@@ -568,7 +569,11 @@ def CE(args, model, dataloader):
             print(f"intervene t feature for {args.model}")
             
             original_t = cont_c[:,:,0].clone()
-            original_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+            if args.model == 'cet':
+                _, _, (original_yd, _), (_, _), (_, _) = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+            else:
+                original_yd = model(cont_p, cont_c, cat_p, cat_c, val_len, diff_days)
+            
             original_yd = torch.clamp(original_yd, 0, 1)
             
             # intervene_t를 모든 가능한 t 로 설정
@@ -886,3 +891,18 @@ def cetransformer_loss(x_reconstructed, x,
     total_loss = lambdas[0]*pred_loss + lambdas[1]*kl_loss + lambdas[2]*recon_loss
     # total_loss = lambdas[0]*enc_y_loss + lambdas[1]*enc_d_loss #+ lambdas[2]*recon_loss
     return total_loss, (enc_y_loss, enc_d_loss), (dec_y_loss, dec_d_loss), (enc_t_loss, dec_t_loss), (pred_loss, kl_loss, recon_loss)
+
+def sigmoid_annealing(epoch, total_epochs, k=1.0, x0=0.5):
+    """Calculate the sigmoid annealing value for lambda.
+    
+    Args:
+    - epoch (int): Current epoch.
+    - total_epochs (int): Total number of epochs.
+    - k (float): Steepness of the curve.
+    - x0 (float): Midpoint of the sigmoid.
+    
+    Returns:
+    - float: Sigmoid annealed value for the lambda.
+    """
+    x = (epoch / total_epochs) - x0
+    return 1 / (1 + np.exp(-k * x))
