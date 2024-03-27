@@ -65,9 +65,9 @@ parser.add_argument(
 # Model ---------------------------------------------------------
 parser.add_argument(
     "--model",
-    type=str, default='dragonnet',
-    choices=["dragonnet", "tarnet"],
-    help="model name (default : dragonnet)")
+    type=str, default='iTransformer',
+    choices=["iTransformer"],
+    help="model name (default : iTransformer)")
 
 parser.add_argument("--save_path",
             type=str, default="/mlainas/medical-ai/cluster-regression/exp_result/",
@@ -81,10 +81,21 @@ parser.add_argument(
 
 parser.add_argument(
     "--hidden_dim",
-    type=int, default=200,
-    help="model hidden size (default : 200)"
+    type=int, default=128,
+    help="DL model hidden size (default : 128)"
 )
 
+parser.add_argument(
+    "--num_layers",
+    type=int, default=1,
+    help="DL model layer num (default : 1)"
+)
+
+parser.add_argument(
+    "--num_heads",
+    type=int, default=2,
+    help="Transformer model head num (default : 2)"
+)
 
 parser.add_argument(
     "--output_size",
@@ -92,8 +103,11 @@ parser.add_argument(
     help="Output size (default : 2)"
 )
 
-parser.add_argument("--disable_embedding", action='store_true',
-        help = "Disable embedding to use raw data (Default : False)")
+parser.add_argument(
+    "--drop_out",
+    type=float, default=0.0,
+    help="Dropout Rate (Default : 0)"
+)
 
 parser.add_argument(
     "--use_treatment", action='store_true'
@@ -134,9 +148,6 @@ parser.add_argument("--t_max", type=int, default=200,
                 help="T_max for Cosine Annealing Learning Rate Scheduler (Default : 200)")
 #----------------------------------------------------------------
 
-parser.add_argument("--alpha", type=float, default=1.0,
-                help="cross entropy for t predction on dragonnet (Default : 1.0)")
-
 
 args = parser.parse_args()
 ## ----------------------------------------------------------------------------------------------------
@@ -154,9 +165,9 @@ if args.ignore_wandb == False:
     wandb.init(entity="mlai_medical_ai", project="cluster-regression", group=args.run_group)
     wandb.config.update(args)
     if args.disable_embedding:
-        wandb.run.name = f"raw_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.alpha}"
+        wandb.run.name = f"raw_{args.model}{args.optim}-{args.lr_init}-{args.wd}"
     else:
-        wandb.run.name = f"embed_{args.model}({args.hidden_dim})-{args.optim}-{args.lr_init}-{args.wd}-{args.alpha}"
+        wandb.run.name = f"embed_{args.model}-{args.optim}-{args.lr_init}-{args.wd}"
        
 ## Load Data --------------------------------------------------------------------------------
 ### ./data/data_mod.ipynb 에서 기본적인 데이터 전처리  ###
@@ -187,20 +198,14 @@ print("Successfully load data!")
 
 
 ## Model ------------------------------------------------------------------------------------
-if args.model == 'tarnet':
-    model = models.TarNet(args = args,
-                        input_size = args.num_features,
-                        hidden_size = args.hidden_dim,
-                        output_size = args.output_size,
-                        disable_embedding = args.disable_embedding).to(args.device)
-    
-elif args.model == 'dragonnet':
-    model = models.DragonNet(args=args,
-                        input_size = args.num_features,
-                        hidden_size = args.hidden_dim,
-                        output_size = args.output_size,
-                        disable_embedding = args.disable_embedding).to(args.device)
-
+if args.model == 'iTransformer':
+    model = models.iTransformer(args=args,
+                               input_size=args.num_features, 
+                               hidden_size=args.hidden_dim, 
+                               output_size=args.output_size, 
+                               num_layers=args.num_layers, 
+                               num_heads=args.num_heads, 
+                               drop_out=args.drop_out,).to(args.device)
 print(f"Successfully prepared {args.model} model")
 # ---------------------------------------------------------------------------------------------
 
@@ -262,12 +267,12 @@ for epoch in range(1, args.epochs + 1):
     
     ## Training Phase -----------------------------------------------------------------------------
     for itr, data in enumerate(tr_dataloader):
+
         ## Training phase
-        tr_batch_loss_d, tr_batch_loss_y, tr_batch_loss_t, tr_num_data, tr_predicted, tr_ground_truth = utils.train_causal_model(args, data, model, optimizer, criterion)
+        tr_batch_loss_d, tr_batch_loss_y, tr_num_data, tr_predicted, tr_ground_truth = utils.train_iTrans(args, data, model, optimizer, criterion)
             
         tr_epoch_loss_d += tr_batch_loss_d
         tr_epoch_loss_y += tr_batch_loss_y
-        tr_epoch_loss_t += tr_batch_loss_t
         
         concat_tr_num_data += tr_num_data
 
@@ -287,16 +292,15 @@ for epoch in range(1, args.epochs + 1):
 
     ## Validation Phase ----------------------------------------------------------------------
     val_output=[]; test_output=[]
-    val_loss_d_list = []; val_loss_y_list = [] ; val_loss_t_list = []
-    test_mae_d_list = []; test_mae_y_list = [] ; test_rmse_d_list = []; test_rmse_y_list = []; test_t_list = []
+    val_loss_d_list = []; val_loss_y_list = []
+    test_mae_d_list = []; test_mae_y_list = [] ; test_rmse_d_list = []; test_rmse_y_list = []
     for i in range(cutdates_num+1):
         for itr, data in enumerate(val_dataloaders[i]):
-            val_batch_loss_d, val_batch_loss_y, val_batch_loss_t, val_num_data, val_predicted, val_ground_truth = utils.valid_causal_model(args, data, model, eval_criterion,
+            val_batch_loss_d, val_batch_loss_y, val_num_data, val_predicted, val_ground_truth = utils.valid_iTrans(args, data, model, eval_criterion,
                                                                                 args.scaling, val_datasets[i].dataset.a_y, val_datasets[i].dataset.b_y,
                                                                                 val_datasets[i].dataset.a_d, val_datasets[i].dataset.b_d)
             val_epoch_loss_d += val_batch_loss_d
             val_epoch_loss_y += val_batch_loss_y
-            val_epoch_loss_t += val_batch_loss_t
             
             concat_val_num_data += val_num_data
 
@@ -311,12 +315,11 @@ for epoch in range(1, args.epochs + 1):
         # save list for all cut-off dates
         val_loss_d_list.append(val_loss_d)
         val_loss_y_list.append(val_loss_y)
-        val_loss_t_list.append(val_loss_t)
         # ---------------------------------------------------------------------------------------
 
         ## Test Phase ----------------------------------------------------------------------
         for itr, data in enumerate(test_dataloaders[i]):
-            te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_batch_loss_t, te_num_data, te_predicted, te_ground_truth = utils.test_causal_model(args, data, model, args.scaling,
+            te_mae_batch_loss_d, te_mae_batch_loss_y, te_mse_batch_loss_d, te_mse_batch_loss_y, te_num_data, te_predicted, te_ground_truth = utils.test_iTrans(args, data, model, args.scaling,
                                                                                                                                                 test_datasets[i].dataset.a_y, test_datasets[i].dataset.b_y,
                                                                                                                                                 test_datasets[i].dataset.a_d, test_datasets[i].dataset.b_d)
 
@@ -325,8 +328,6 @@ for epoch in range(1, args.epochs + 1):
             te_mse_epoch_loss_d += te_mse_batch_loss_d
             te_mse_epoch_loss_y += te_mse_batch_loss_y
             
-            te_epoch_loss_t += te_batch_loss_t
-            
             concat_te_num_data += te_num_data
 
         # Calculate Epoch loss
@@ -334,15 +335,12 @@ for epoch in range(1, args.epochs + 1):
         te_mae_loss_y = te_mae_epoch_loss_y / concat_te_num_data
         te_rmse_loss_d = math.sqrt(te_mse_epoch_loss_d / concat_te_num_data)
         te_rmse_loss_y = math.sqrt(te_mse_epoch_loss_y / concat_te_num_data)
-        
-        te_loss_t = te_epoch_loss_t / concat_te_num_data
 
         # save list for all cut-off dates
         test_mae_d_list.append(te_mae_loss_d);test_mae_y_list.append(te_mae_loss_y)
         test_rmse_d_list.append(te_rmse_loss_d); test_rmse_y_list.append(te_rmse_loss_y)
-        test_t_list.append(te_loss_t)
         # ---------------------------------------------------------------------------------------
-        
+
         # Save Best Model (Early Stopping)
         if val_loss_d + val_loss_y < best_val_loss_d[i] + best_val_loss_y[i]:
             best_epochs[i] = epoch
@@ -358,7 +356,7 @@ for epoch in range(1, args.epochs + 1):
             best_model = model
             # save state_dict
             os.makedirs(args.save_path, exist_ok=True)
-            utils.save_checkpoint(file_path = f"./best_model/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.alpha}-date{i}_best_val.pt",
+            utils.save_checkpoint(file_path = f"./best_model/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-date{i}_best_val.pt",
                                 epoch = epoch,
                                 state_dict = model.state_dict(),
                                 optimizer = optimizer.state_dict(),
@@ -369,13 +367,13 @@ for epoch in range(1, args.epochs + 1):
                                 'val_ground_truth_y':val_gt_y_list,
                                 'val_pred_d' : val_pred_d_list,
                                 'val_ground_truth_d' : val_gt_d_list})
-                val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.alpha}_best_val_pred.csv", index=False)
+                val_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}_best_val_pred.csv", index=False)
 
                 te_df = pd.DataFrame({'te_pred_y':te_pred_y_list,
                                 'te_ground_truth_y':te_gt_y_list,
                                 'te_pred_d' : te_pred_d_list,
                                 'te_ground_truth_d' : te_gt_d_list})                
-                te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.alpha}_best_te_pred.csv", index=False)
+                te_df.to_csv(f"{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}_best_te_pred.csv", index=False)
 
     # print values
     values = [epoch, lr, tr_loss_d, tr_loss_y, val_loss_d_list[args.table_idx], val_loss_y_list[args.table_idx], test_mae_d_list[args.table_idx], test_mae_y_list[args.table_idx], test_rmse_d_list[args.table_idx], test_rmse_y_list[args.table_idx]]    
@@ -399,11 +397,9 @@ for epoch in range(1, args.epochs + 1):
         "train/y": tr_loss_y, 
         "concat/valid_d": val_loss_d_list[0],
         "concat/valid_y": val_loss_y_list[0],
-        "concat/valid_t [norm]": val_loss_t_list[0],
         "concat/test_total (mae)": test_mae_d_list[0] + test_mae_y_list[0],
         "concat/test_d (mae)": test_mae_d_list[0],
         "concat/test_y (mae)": test_mae_y_list[0],
-        "concat/test_t (mae)": test_t_list[0],
         "concat/test_total (rmse)": test_rmse_d_list[0] + test_rmse_y_list[0],
         "concat/test_d (rmse)": test_rmse_d_list[0],
         "concat/test_y (rmse)": test_rmse_y_list[0],
@@ -415,11 +411,9 @@ for epoch in range(1, args.epochs + 1):
             wandb_log.update({
                 f"date_{i}/valid_d": val_loss_d_list[i],
                 f"date_{i}/valid_y": val_loss_y_list[i],
-                f"date_{i}/valid_t [norm]": val_loss_t_list[i],
                 f"date_{i}/test_total (mae)": test_mae_d_list[i] + test_mae_y_list[i],
                 f"date_{i}/test_d (mae)": test_mae_d_list[i],
                 f"date_{i}/test_y (mae)": test_mae_y_list[i],
-                f"date_{i}/test_t [norm] (mae)": test_t_list[i],
                 f"date_{i}/test_total (rmse)": test_rmse_d_list[i] + test_rmse_y_list[i],
                 f"date_{i}/test_d (rmse)": test_rmse_d_list[i],
                 f"date_{i}/test_y (rmse)": test_rmse_y_list[i],
@@ -433,7 +427,7 @@ for epoch in range(1, args.epochs + 1):
 
 ## Print Best Model ---------------------------------------------------------------------------
 print(f"Best {args.model} achieved [d:{best_test_losses[args.table_idx][0]}, y:{best_test_losses[args.table_idx][1]}] on {best_epochs[args.table_idx]} epoch!!")
-print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}-{args.alpha}_best_val.pt'!!")
+print(f"The model saved as '{args.save_path}/{args.model}-{args.optim}-{args.lr_init}-{args.wd}_best_val.pt'!!")
 if args.ignore_wandb == False:
     for i in range(cutdates_num+1):
         date_key = "concat" if i == 0 else f"date_{i}"

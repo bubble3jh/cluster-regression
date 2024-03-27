@@ -880,8 +880,6 @@ def train_causal_model(args, data, model, optimizer, criterion):
     
     loss_y, loss_d, yd_pred = causal_yd_loss(yd0_pred, yd1_pred, yd2_pred, yd3_pred, yd4_pred, yd5_pred, yd6_pred, yd_true, t_pred, criterion)
     yd_pred_loss = loss_y + loss_d
-    # t_pred, t_true간의 crossentropy 계산이 안 됨
-    # RuntimeError: "nll_loss_forward_reduce_cuda_kernel_2d_index" not implemented for 'Float'
     t_loss = causal_t_loss(t_pred, t_true)
     total_loss = yd_pred_loss + args.alpha * t_loss
                 
@@ -949,5 +947,80 @@ def test_causal_model(args, data, model, scaling, a_y, b_y, a_d, b_d):
     
     if not torch.isnan(mae) and not torch.isnan(rmse):
         return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), t_loss.item(), batch_num, yd_pred, yd_true
+    else:
+        return 0, batch_num, yd_pred, yd_true
+    
+    
+##############################################################
+## iTransformer
+##############################################################
+def train_iTrans(args, data, model, optimizer, criterion):
+    model.train()
+    optimizer.zero_grad()
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, yd_true, diff_days, *t = data_load(data)
+    
+    t_true = t[0]
+    yd_pred = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    
+    loss_d = criterion(yd_pred[:,0], yd_true[:,0])
+    loss_y = criterion(yd_pred[:,1], yd_true[:,1])    
+    loss = loss_d + loss_y
+                
+    if not torch.isnan(loss):
+        loss.backward()
+        optimizer.step()
+        return loss_d.item(), loss_y.item(), batch_num, yd_pred, yd_true
+    else:
+        # return 0, batch_num, out, y
+        raise ValueError("Loss raised nan.")
+    
+    
+@torch.no_grad()
+def valid_iTrans(args, data, model, eval_criterion, scaling, a_y, b_y, a_d, b_d):
+    model.eval()
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, yd_true, diff_days, *t = data_load(data)
+
+    t_true = t[0]
+    yd_pred = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+    
+    pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, yd_pred, yd_true, a_y, b_y, a_d, b_d)
+    loss_y = eval_criterion(pred_y, gt_y)
+    loss_d = eval_criterion(pred_d, gt_d)
+    
+    loss = loss_y + loss_d
+    
+    if not torch.isnan(loss):
+        return loss_d.item(), loss_y.item(), batch_num, yd_pred, yd_true
+    else:
+        return 0, batch_num, yd_pred, yd_true
+    
+    
+@torch.no_grad()
+def test_iTrans(args, data, model, scaling, a_y, b_y, a_d, b_d):
+    
+    criterion_mae = nn.L1Loss(reduction="sum")
+    criterion_rmse = nn.MSELoss(reduction="sum")
+    
+    model.eval()
+
+    batch_num, cont_p, cont_c, cat_p, cat_c, len, yd_true, diff_days, *t = data_load(data)
+    
+    t_true = t[0]
+    yd_pred = model(cont_p, cont_c, cat_p, cat_c, len, diff_days)
+
+    pred_y, pred_d, gt_y, gt_d = reverse_scaling(scaling, yd_pred, yd_true, a_y, b_y, a_d, b_d)
+    
+    # MAE
+    mae_y = criterion_mae(pred_y, gt_y)
+    mae_d = criterion_mae(pred_d, gt_d)
+    mae = mae_y + mae_d
+    
+    # RMSE
+    rmse_y = criterion_rmse(pred_y, gt_y)
+    rmse_d = criterion_rmse(pred_d, gt_d)
+    rmse = rmse_y + rmse_d
+    
+    if not torch.isnan(mae) and not torch.isnan(rmse):
+        return mae_d.item(), mae_y.item(), rmse_d.item(), rmse_y.item(), batch_num, yd_pred, yd_true
     else:
         return 0, batch_num, yd_pred, yd_true
