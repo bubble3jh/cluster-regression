@@ -854,7 +854,7 @@ class customTransformerEncoder(TransformerEncoder):
                 output = output + yd_emb.unsqueeze(1)
             elif idx == 2:
                 if self.residual_x:
-                    output = output + x2_res
+                    output = output + x2_res.unsqueeze(1)
 
         if convert_to_nested:
             output = output.to_padded_tensor(0., src.size())
