@@ -714,7 +714,7 @@ class MLP(nn.Module):
         return self.layers(x)
 
 class customTransformerEncoder(TransformerEncoder):
-    def __init__(self, encoder_layer, num_layers, d_model, drop_out, pred_layers=1, norm=None, enable_nested_tensor=True, mask_check=True, seq_wise=False, residual_t=False):
+    def __init__(self, encoder_layer, num_layers, d_model, drop_out, pred_layers=1, norm=None, enable_nested_tensor=True, mask_check=True, seq_wise=False, residual_t=False, residual_x = False):
         super().__init__(encoder_layer, num_layers, norm, enable_nested_tensor, mask_check)
         self.x2t = MLP(d_model,d_model//2, 1, num_layers=pred_layers) # Linear
         self.t_emb = MLP(1,d_model//2, d_model, num_layers=pred_layers) # Linear
@@ -722,6 +722,7 @@ class customTransformerEncoder(TransformerEncoder):
         self.yd_emb = MLP(2,d_model//2, d_model, num_layers=pred_layers) # Linear
         self.seq_wise = seq_wise
         self.residual_t = residual_t
+        self.residual_x = residual_x
 
     def forward(self, src: Tensor, mask: Tensor | None = None, src_key_padding_mask: Tensor | None = None, is_causal: bool | None = None, val_len: Tensor | None = None, intervene_t: Tensor | None = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
@@ -831,6 +832,7 @@ class customTransformerEncoder(TransformerEncoder):
                 t_pred = torch.clamp(t_pred, 0, 1) # min-max normalized
                 t = t_pred if intervene_t == None else intervene_t
                 t_emb = self.t_emb(t)
+                x1_res = output_emb.clone()
                 t_res = t_emb.clone()
                 output = output + t_emb.unsqueeze(1)
             elif idx == 1:
@@ -841,14 +843,18 @@ class customTransformerEncoder(TransformerEncoder):
                     val_mask = torch.arange(output.size(1))[None, :].cuda() < val_len[:, None]
                     output_emb = (output * val_mask.unsqueeze(-1).float()).sum(1) / val_mask.sum(1).unsqueeze(-1).float()
                     # output_emb = torch.mean(output, dim=1) # average
+                x2_res = output_emb.clone()
                 if self.residual_t:
                     output_emb = output_emb + t_res
+                if self.residual_x:
+                    output_emb = output_emb + x1_res
                 yd = self.xt2yd(output_emb)
                 yd = torch.clamp(yd, 0, 1)  # min-max normalized
                 yd_emb = self.yd_emb(yd)
                 output = output + yd_emb.unsqueeze(1)
-            # elif idx == 2:
-            #     output = output + yd_emb.unsqueeze(1)
+            elif idx == 2:
+                if self.residual_x:
+                    output = output + x2_res
 
         if convert_to_nested:
             output = output.to_padded_tensor(0., src.size())
@@ -858,7 +864,7 @@ class customTransformerEncoder(TransformerEncoder):
         return output, t, yd
 
 class CETransformer(nn.Module):
-    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False, is_variational=False, use_treatment=True, residual_t = False):
+    def __init__(self, d_model, nhead, d_hid, nlayers, pred_layers=1, dropout=0.5, shift=False ,seq_wise=False, unidir=False, is_variational=False, use_treatment=True, residual_t = False, residual_x = False):
         super(CETransformer, self).__init__()
         self.shift = shift
         self.unidir = unidir
@@ -875,7 +881,7 @@ class CETransformer(nn.Module):
         self.embedding = CEVAEEmbedding(output_size=d_model, disable_embedding = False, disable_pe=False, reduction="none", shift= shift, use_treatment=use_treatment)
         # self.pos_encoder = PositionalEncoding(d_model, dropout)
         encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout, batch_first=True, norm_first=True)
-        self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers, seq_wise=seq_wise, residual_t=residual_t)
+        self.transformer_encoder = customTransformerEncoder(encoder_layers, nlayers, d_model, drop_out=dropout, pred_layers=pred_layers, seq_wise=seq_wise, residual_t=residual_t, residual_x=residual_x)
         # self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
 
         # Vairatioanl Z

@@ -150,6 +150,9 @@ parser.add_argument("--variational", action='store_true',
 parser.add_argument("--residual_t", action='store_true',
         help = "residual connection with t to yd (Default : False)")
 
+parser.add_argument("--residual_x", action='store_true',
+        help = "residual connection with x to tyd (Default : False)")
+
 #----------------------------------------------------------------
 
 # Criterion -----------------------------------------------------
@@ -258,7 +261,7 @@ if args.model == 'cet':
     model = models.CETransformer(d_model=args.num_features, nhead=args.num_heads, d_hid=args.hidden_dim, 
                           nlayers=4 , dropout=args.drop_out, pred_layers=args.num_layers, shift=args.shift,
                           unidir=args.unidir, is_variational=args.variational, use_treatment=args.use_treatment
-                          ,residual_t=args.residual_t).to(args.device) # TODO: Hard coded for transformer layers
+                          ,residual_t=args.residual_t, residual_x=args.residual_x).to(args.device) # TODO: Hard coded for transformer layers
     print("use cet model")
     # args.use_treatment=True
    
@@ -589,6 +592,7 @@ if args.ignore_wandb == False:
     wandb.run.summary["CE_d"] = ce_d
     wandb.run.summary["CACC_y"] = negative_acc_y
     wandb.run.summary["CACC_d"] = negative_acc_d
+    wandb.run.summary["CACC_avg"] = (negative_acc_y + negative_acc_d)/2
     wandb.run.summary["tr_dat_num"] = concat_tr_num_data
     # wandb.run.summary["val_dat_num"] : concat_val_num_data
     # wandb.run.summary["te_dat_num"] : concat_te_num_data
